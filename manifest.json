@@ -1,0 +1,104 @@
+{
+    "manifest_version": 3,
+    "name": "PraisonAI Browser Agent",
+    "version": "1.0.0",
+    "description": "AI-powered browser automation with on-device AI. Navigate, click, type, screenshot, and control your browser with natural language.",
+    "author": "PraisonAI",
+    "homepage_url": "https://docs.praison.ai",
+    "minimum_chrome_version": "138",
+    "permissions": [
+        "sidePanel",
+        "activeTab",
+        "tabs",
+        "scripting",
+        "debugger",
+        "storage",
+        "contextMenus",
+        "notifications",
+        "offscreen"
+    ],
+    "optional_permissions": [
+        "history",
+        "bookmarks"
+    ],
+    "commands": {
+        "_execute_action": {
+            "suggested_key": {
+                "default": "Ctrl+Shift+P",
+                "mac": "Command+Shift+P"
+            },
+            "description": "Open PraisonAI panel"
+        },
+        "start-agent": {
+            "suggested_key": {
+                "default": "Alt+A",
+                "mac": "Option+A"
+            },
+            "description": "Start browser agent"
+        },
+        "capture-screenshot": {
+            "suggested_key": {
+                "default": "Alt+S",
+                "mac": "Option+S"
+            },
+            "description": "Capture screenshot"
+        }
+    },
+    "host_permissions": [
+        "<all_urls>"
+    ],
+    "background": {
+        "service_worker": "background.js",
+        "type": "module"
+    },
+    "side_panel": {
+        "default_path": "sidepanel.html"
+    },
+    "action": {
+        "default_title": "PraisonAI Browser Agent",
+        "default_icon": {
+            "16": "icons/icon16.png",
+            "32": "icons/icon32.png",
+            "48": "icons/icon48.png",
+            "128": "icons/icon128.png"
+        }
+    },
+    "icons": {
+        "16": "icons/icon16.png",
+        "32": "icons/icon32.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_idle"
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "icons/*"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ],
+    "content_security_policy": {
+        "extension_pages": "script-src 'self'; object-src 'self'"
+    },
+    "externally_connectable": {
+        "matches": [
+            "http://localhost:*/*",
+            "https://docs.praison.ai/*",
+            "https://praison.ai/*"
+        ]
+    },
+    "key": ""
+}

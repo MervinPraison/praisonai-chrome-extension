@@ -1,0 +1,39 @@
+{
+    "name": "praisonai-chrome-extension",
+    "version": "1.0.0",
+    "description": "PraisonAI Browser Agent - AI-powered browser automation with Side Panel and Built-in AI",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite build --watch --mode development",
+        "build": "vite build --mode production",
+        "build:zip": "npm run build && cd dist && zip -r ../praisonai-extension.zip .",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:coverage": "vitest run --coverage",
+        "lint": "eslint src --ext .ts,.tsx",
+        "lint:fix": "eslint src --ext .ts,.tsx --fix",
+        "format": "prettier --write src/**/*.ts",
+        "typecheck": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "@anthropic-ai/sdk": "^0.38.0",
+        "@anthropic-ai/tokenizer": "^0.0.4",
+        "@types/chrome": "^0.0.287",
+        "@types/node": "^22.10.7",
+        "@vitest/coverage-v8": "^3.0.4",
+        "eslint": "^9.18.0",
+        "eslint-config-prettier": "^10.0.1",
+        "prettier": "^3.4.2",
+        "typescript": "^5.7.3",
+        "vite": "^6.0.7",
+        "vite-plugin-static-copy": "^2.2.0",
+        "vitest": "^3.0.4"
+    },
+    "dependencies": {
+        "zod": "^3.24.1"
+    },
+    "engines": {
+        "node": ">=20.0.0"
+    }
+}
