@@ -7,20 +7,80 @@
  * - Side panel management
  * - Message routing between components
  * - CDP session management
+ * - Bridge server connection
  */
 
 import { CDPClient, createCDPClient } from '../cdp/client';
 import { BrowserAgent } from '../ai/agent';
+import { BridgeClient, getBridgeClient } from '../bridge/client';
 
 // Active CDP sessions by tab ID
 const cdpSessions = new Map<number, CDPClient>();
 const agents = new Map<number, BrowserAgent>();
+
+// Bridge server connection
+let bridgeClient: BridgeClient | null = null;
+let bridgeConnected = false;
 
 // Console logs captured from pages
 const consoleLogs = new Map<number, Array<{ level: string; text: string; timestamp: number }>>();
 
 // Panel state tracking
 const panelState = new Map<number, boolean>();
+
+/**
+ * Initialize bridge connection
+ */
+async function initBridgeConnection(): Promise<boolean> {
+    if (bridgeClient && bridgeConnected) {
+        return true;
+    }
+
+    bridgeClient = getBridgeClient({
+        serverUrl: 'ws://localhost:8765/ws',
+        maxReconnectAttempts: 3,
+    });
+
+    bridgeClient.onStateChange = (state) => {
+        bridgeConnected = state === 'connected';
+        console.log(`[PraisonAI] Bridge connection: ${state}`);
+
+        // Notify side panel of connection state
+        chrome.runtime.sendMessage({
+            type: 'BRIDGE_STATE',
+            connected: bridgeConnected,
+        }).catch(() => { }); // Ignore if no listener
+    };
+
+    bridgeClient.onAction = (action) => {
+        console.log(`[PraisonAI] Bridge action:`, action);
+        // Forward to side panel for display
+        chrome.runtime.sendMessage({
+            type: 'BRIDGE_ACTION',
+            action,
+        }).catch(() => { });
+    };
+
+    bridgeClient.onThought = (thought) => {
+        chrome.runtime.sendMessage({
+            type: 'BRIDGE_THOUGHT',
+            thought,
+        }).catch(() => { });
+    };
+
+    bridgeClient.onError = (error) => {
+        console.error(`[PraisonAI] Bridge error:`, error);
+        chrome.runtime.sendMessage({
+            type: 'BRIDGE_ERROR',
+            error,
+        }).catch(() => { });
+    };
+
+    return bridgeClient.connect();
+}
+
+// Try to connect to bridge server on startup
+initBridgeConnection().catch(console.error);
 
 /**
  * Side Panel lifecycle events (Chrome 141+)
