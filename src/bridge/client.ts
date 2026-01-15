@@ -22,9 +22,11 @@ export interface BridgeMessage {
 
 export interface ActionMessage extends BridgeMessage {
     type: 'action';
-    action: 'click' | 'type' | 'scroll' | 'navigate' | 'wait' | 'screenshot' | 'done';
+    action: string;  // Allow any action type from LLM
     selector?: string;
     text?: string;
+    value?: string;  // Alias for text (LLM sometimes returns value instead of text)
+    key?: string;    // For pressKey action
     url?: string;
     direction?: 'up' | 'down';
     thought?: string;
@@ -61,11 +63,14 @@ export class BridgeClient {
     private currentGoal: string | null = null;
     private stepNumber = 0;
     private cdpClient: CDPClient | null = null;
+    private stopped = false;  // Flag to interrupt actions
 
     public onStateChange: ((state: ConnectionState) => void) | null = null;
     public onAction: ((action: ActionMessage) => void) | null = null;
     public onError: ((error: string) => void) | null = null;
     public onThought: ((thought: string) => void) | null = null;
+    public onComplete: ((summary: string) => void) | null = null;  // Task completion callback
+    public onStartAutomation: ((goal: string, sessionId: string) => void) | null = null;  // Server-triggered start
 
     constructor(config: Partial<BridgeConfig> = {}) {
         this.config = {
@@ -143,6 +148,7 @@ export class BridgeClient {
     async startSession(goal: string, model?: string): Promise<boolean> {
         this.currentGoal = goal;
         this.stepNumber = 0;
+        this.stopped = false;  // Reset stopped flag for new session
 
         return this.send({
             type: 'start_session',
@@ -155,6 +161,23 @@ export class BridgeClient {
      * Stop the current session
      */
     async stopSession(): Promise<boolean> {
+        // Set stopped flag first to interrupt any ongoing actions
+        this.stopped = true;
+
+        // Clean up mouse pointer from page
+        if (this.cdpClient) {
+            try {
+                await this.cdpClient.evaluate(`
+                    const pointer = document.getElementById('praisonai-pointer');
+                    if (pointer) pointer.remove();
+                    const styles = document.getElementById('praisonai-styles');
+                    if (styles) styles.remove();
+                `);
+            } catch {
+                // Ignore cleanup errors
+            }
+        }
+
         const result = await this.send({
             type: 'stop_session',
             session_id: this.sessionId || '',
@@ -163,6 +186,7 @@ export class BridgeClient {
         this.sessionId = null;
         this.currentGoal = null;
         this.stepNumber = 0;
+        this.onAction = null;  // Clear action handler
 
         return result;
     }
@@ -171,6 +195,12 @@ export class BridgeClient {
      * Send an observation to the server and wait for action
      */
     async sendObservation(observation: Omit<ObservationMessage, 'type' | 'session_id'>): Promise<boolean> {
+        // Guard: Don't send if session stopped
+        if (this.stopped || !this.sessionId) {
+            console.log('[Bridge] Skipping observation - session stopped or no session');
+            return false;
+        }
+
         this.stepNumber++;
 
         return this.send({
@@ -191,56 +221,288 @@ export class BridgeClient {
     /**
      * Execute an action using the CDP client
      */
-    async executeAction(action: ActionMessage): Promise<boolean> {
+    async executeAction(action: ActionMessage): Promise<{ success: boolean; error?: string }> {
+        // Check if stopped
+        if (this.stopped) {
+            console.log('[Bridge] Session stopped, skipping action');
+            return false;
+        }
+
         if (!this.cdpClient) {
             console.error('[Bridge] No CDP client set');
             return false;
         }
 
+        // Normalize: use 'value' if 'text' is missing
+        // Normalize: server may send 'element' or 'selector'
+        const selector = action.selector || action.element || '';
+        const textValue = action.text || action.value || action.key || action.query || '';
+
+        console.log('[Bridge] Executing action:', action.action, selector || textValue || '');
+
+        // Track success and error for this action
+        let actionSuccess = true;
+        let actionError: string | undefined;
+
         try {
             switch (action.action) {
                 case 'click':
-                    if (action.selector) {
-                        await this.cdpClient.click(action.selector);
+                case 'confirm': // confirm is a click action
+                    if (selector) {
+                        const method = action.clickMethod || 'auto';
+                        console.log('[Bridge] Clicking element:', selector, 'method:', method);
+                        await this.showMousePointer(selector);
+                        const clickResult = await this.cdpClient.clickElement(selector, method);
+                        if (!clickResult.success) {
+                            console.error('[Bridge] Click failed:', clickResult.error);
+                            actionSuccess = false;
+                            actionError = clickResult.error || `Click failed on ${selector}`;
+                        } else {
+                            // Wait for potential navigation after click
+                            await new Promise(r => setTimeout(r, 500));
+                        }
                     }
                     break;
 
                 case 'type':
-                    if (action.selector && action.text) {
-                        await this.cdpClient.type(action.selector, action.text);
+                case 'input':  // input is alias for type
+                    if (selector && textValue) {
+                        console.log('[Bridge] Typing in element:', selector, 'text:', textValue);
+                        await this.showMousePointer(selector);
+                        const typeResult = await this.cdpClient.typeInElement(selector, textValue);
+                        if (!typeResult.success) {
+                            console.error('[Bridge] Type failed:', typeResult.error);
+                            actionSuccess = false;
+                            actionError = typeResult.error || `Type failed on ${selector}`;
+                        }
+                    } else if (textValue) {
+                        // Type without selector - just send keystrokes
+                        console.log('[Bridge] Typing text (no selector):', textValue);
+                        await this.cdpClient.type(textValue);
                     }
                     break;
 
+                case 'search':
+                    // Search = type + Enter
+                    if (selector && textValue) {
+                        console.log('[Bridge] Searching:', textValue, 'in', selector);
+                        await this.showMousePointer(selector);
+                        await this.cdpClient.typeInElement(selector, textValue);
+                    } else if (textValue) {
+                        // Try to find a search input
+                        console.log('[Bridge] Searching:', textValue);
+                        const searchInputs = ['input[name="q"]', 'textarea[name="q"]', '#APjFqb', 'input[type="search"]', 'input[type="text"]'];
+                        for (const inputSelector of searchInputs) {
+                            const result = await this.cdpClient.typeInElement(inputSelector, textValue);
+                            if (result.success) {
+                                await this.showMousePointer(inputSelector);
+                                break;
+                            }
+                        }
+                    }
+                    // Press Enter to submit search
+                    await new Promise(r => setTimeout(r, 100));
+                    await this.cdpClient.send('Input.dispatchKeyEvent', {
+                        type: 'keyDown', key: 'Enter', code: 'Enter',
+                        windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13,
+                    });
+                    await this.cdpClient.send('Input.dispatchKeyEvent', {
+                        type: 'keyUp', key: 'Enter', code: 'Enter',
+                    });
+                    await new Promise(r => setTimeout(r, 1000));
+                    break;
+
+                case 'press':  // press Enter, Tab, etc.
+                case 'pressKey':
+                    const keyToPress = textValue || 'Enter';
+                    console.log('[Bridge] Pressing key:', keyToPress);
+                    // Dispatch proper key event, not type text
+                    const keyCode = keyToPress === 'Enter' ? 13 : keyToPress === 'Tab' ? 9 : 0;
+                    await this.cdpClient.send('Input.dispatchKeyEvent', {
+                        type: 'keyDown',
+                        key: keyToPress,
+                        code: keyToPress,
+                        windowsVirtualKeyCode: keyCode,
+                        nativeVirtualKeyCode: keyCode,
+                    });
+                    await this.cdpClient.send('Input.dispatchKeyEvent', {
+                        type: 'keyUp',
+                        key: keyToPress,
+                        code: keyToPress,
+                    });
+                    await new Promise(r => setTimeout(r, 500));
+                    break;
+
+                case 'submit':
+                case 'enter':
+                    // Press Enter key to submit forms
+                    console.log('[Bridge] Pressing Enter to submit');
+                    await this.cdpClient.send('Input.dispatchKeyEvent', {
+                        type: 'keyDown',
+                        key: 'Enter',
+                        code: 'Enter',
+                        windowsVirtualKeyCode: 13,
+                        nativeVirtualKeyCode: 13,
+                    });
+                    await this.cdpClient.send('Input.dispatchKeyEvent', {
+                        type: 'keyUp',
+                        key: 'Enter',
+                        code: 'Enter',
+                    });
+                    // Wait for navigation/response
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    break;
+
                 case 'scroll':
-                    await this.cdpClient.scroll(action.direction === 'down' ? 300 : -300);
+                    const deltaY = action.direction === 'down' ? 300 : -300;
+                    console.log('[Bridge] Scrolling:', action.direction);
+                    await this.cdpClient.scroll(0, deltaY);
                     break;
 
                 case 'navigate':
                     if (action.url) {
-                        await this.cdpClient.evaluate(`window.location.href = '${action.url}'`);
+                        console.log('[Bridge] Navigating to:', action.url);
+                        await this.cdpClient.navigate(action.url);
                     }
                     break;
 
                 case 'wait':
+                case 'waitForNavigation':
+                case 'waitForElement':
+                    console.log('[Bridge] Waiting 1s');
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     break;
 
                 case 'screenshot':
+                    console.log('[Bridge] Taking screenshot');
                     await this.cdpClient.captureScreenshot();
                     break;
 
                 case 'done':
                     console.log('[Bridge] Task completed');
+                    // Generate completion summary
+                    if (this.onComplete) {
+                        const thought = action.thought || '';
+                        const summary = `✅ Task completed!\n\nGoal: ${this.currentGoal}\nSteps: ${this.stepNumber}\n\n${thought}`;
+                        this.onComplete(summary);
+                    }
+                    // Stop the session
+                    this.stopped = true;
                     return true;
 
                 default:
-                    console.warn('[Bridge] Unknown action:', action.action);
+                    console.warn('[Bridge] Unknown action:', action.action, '- treating as wait');
+                    await new Promise(resolve => setTimeout(resolve, 500));
             }
 
-            return true;
+            return { success: actionSuccess, error: actionError };
         } catch (error) {
             console.error('[Bridge] Action execution error:', error);
-            return false;
+            return { success: false, error: error instanceof Error ? error.message : String(error) };
+        }
+    }
+
+    /**
+     * Show visual mouse pointer at element location
+     */
+    private async showMousePointer(selector: string): Promise<void> {
+        if (!this.cdpClient) return;
+
+        try {
+            // Inject green circle mouse pointer at element
+            await this.cdpClient.evaluate(`
+                (function() {
+                    // Add styles if not exists
+                    if (!document.getElementById('praisonai-styles')) {
+                        const style = document.createElement('style');
+                        style.id = 'praisonai-styles';
+                        style.textContent = \`
+                            @keyframes praisonai-pulse {
+                                0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+                                50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.8; }
+                                100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+                            }
+                            @keyframes praisonai-ripple {
+                                0% { width: 20px; height: 20px; opacity: 1; }
+                                100% { width: 60px; height: 60px; opacity: 0; }
+                            }
+                        \`;
+                        document.head.appendChild(style);
+                    }
+                    
+                    // Create or get pointer element - green circle with dot
+                    let pointer = document.getElementById('praisonai-pointer');
+                    if (!pointer) {
+                        pointer = document.createElement('div');
+                        pointer.id = 'praisonai-pointer';
+                        pointer.style.cssText = \`
+                            position: fixed;
+                            width: 24px;
+                            height: 24px;
+                            border: 3px solid #4CAF50;
+                            border-radius: 50%;
+                            z-index: 999999;
+                            pointer-events: none;
+                            transition: left 0.2s ease, top 0.2s ease;
+                            transform: translate(-50%, -50%);
+                            box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+                        \`;
+                        // Add inner dot
+                        const dot = document.createElement('div');
+                        dot.style.cssText = \`
+                            position: absolute;
+                            width: 8px;
+                            height: 8px;
+                            background: #4CAF50;
+                            border-radius: 50%;
+                            top: 50%;
+                            left: 50%;
+                            transform: translate(-50%, -50%);
+                        \`;
+                        pointer.appendChild(dot);
+                        document.body.appendChild(pointer);
+                    }
+                    
+                    // Find element and get its position
+                    const elem = document.querySelector('${selector.replace(/'/g, "\\'")}');
+                    if (elem) {
+                        const rect = elem.getBoundingClientRect();
+                        const x = rect.left + rect.width / 2;
+                        const y = rect.top + rect.height / 2;
+                        
+                        pointer.style.left = x + 'px';
+                        pointer.style.top = y + 'px';
+                        pointer.style.display = 'block';
+                        pointer.style.animation = 'praisonai-pulse 0.5s ease';
+                        
+                        // Add expanding ripple effect on click
+                        const ripple = document.createElement('div');
+                        ripple.style.cssText = \`
+                            position: fixed;
+                            left: \${x}px;
+                            top: \${y}px;
+                            width: 20px;
+                            height: 20px;
+                            border: 2px solid #4CAF50;
+                            border-radius: 50%;
+                            transform: translate(-50%, -50%);
+                            animation: praisonai-ripple 0.6s ease-out forwards;
+                            z-index: 999998;
+                            pointer-events: none;
+                        \`;
+                        document.body.appendChild(ripple);
+                        setTimeout(() => ripple.remove(), 600);
+                        
+                        // Clear animation after it plays
+                        setTimeout(() => {
+                            if (pointer) pointer.style.animation = '';
+                        }, 500);
+                        // Keep pointer visible - will be cleaned up when session ends
+                    }
+                })();
+            `);
+        } catch (error) {
+            console.warn('[Bridge] Failed to show mouse pointer:', error);
         }
     }
 
@@ -313,6 +575,23 @@ export class BridgeClient {
 
                 case 'pong':
                     // Heartbeat response
+                    break;
+
+                case 'start_automation':
+                    // Server triggering automation (from CLI)
+                    const startMsg = message as { type: string; goal: string; session_id: string };
+                    console.log('[Bridge] Start automation from server:', startMsg.goal);
+                    this.sessionId = startMsg.session_id;
+                    this.currentGoal = startMsg.goal;
+                    this.stepNumber = 0;
+                    this.stopped = false;
+                    this.onStartAutomation?.(startMsg.goal, startMsg.session_id);
+                    break;
+
+                case 'reload_extension':
+                    // Server requesting extension reload (for hot reload after build)
+                    console.log('[Bridge] Reloading extension by server request...');
+                    chrome.runtime.reload();
                     break;
 
                 default:

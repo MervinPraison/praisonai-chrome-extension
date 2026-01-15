@@ -186,6 +186,16 @@ function handleMessage(message: { type: string;[key: string]: unknown }) {
             addStep(message.step as { action: { type: string; reason: string }; result: { success: boolean } });
             break;
 
+        case 'AGENT_COMPLETE':
+            // Task completed - show summary and stop
+            const summary = message.summary as string || 'Task completed!';
+            setOutput(summary);
+            updateStatus('ready', 'Completed');
+            elements.startAgent.disabled = false;
+            elements.stopAgent.disabled = true;
+            isAgentRunning = false;
+            break;
+
         case 'SUMMARIZE':
             summarize(message.text as string);
             break;

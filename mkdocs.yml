@@ -1,0 +1,40 @@
+site_name: PraisonAI Chrome Extension
+site_description: AI-powered browser automation extension
+repo_url: https://github.com/MervinPraison/praisonai-chrome-extension
+repo_name: praisonai-chrome-extension
+
+theme:
+  name: material
+  palette:
+    primary: deep purple
+    accent: amber
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+    - search.suggest
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quick-start.md
+  - Usage:
+    - Side Panel: usage/side-panel.md
+    - CLI Integration: usage/cli-integration.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - CDP Client: architecture/cdp-client.md
+  - Reference:
+    - Side Panel API: side-panel-api.md
+    - Manifest Reference: manifest-reference.md
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - admonition
+  - tables
+
+plugins:
+  - search

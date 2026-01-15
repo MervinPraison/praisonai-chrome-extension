@@ -76,6 +76,29 @@ Use individual tools:
 - **Type** - Type text into an element
 - **Evaluate** - Run JavaScript in page context
 
+### CLI Integration
+
+Run automation directly from terminal when extension is connected:
+
+```bash
+# Start the bridge server
+praisonai browser start
+
+# Run a goal with live progress
+praisonai browser run "Go to google and search praisonai" --debug
+
+# Manage tabs
+praisonai browser tabs
+
+# Execute JavaScript
+praisonai browser execute "document.title"
+
+# Take screenshot
+praisonai browser screenshot -o page.png
+```
+
+See [PraisonAI Browser Agent Docs](https://docs.praison.ai/docs/features/browser-agent) for full CLI reference.
+
 ## Architecture
 
 ```

@@ -186,22 +186,77 @@ export class CDPClient {
     }
 
     /**
-     * Click element by selector
+     * Click element by selector with smart fallbacks
+     * Method 1: getBoundingClientRect + mouse events (most reliable)
+     * Method 2: JavaScript element.click() (fallback)
+     * Method 3: Focus + Enter key (for buttons/links)
      */
-    async clickElement(selector: string): Promise<CDPResult<void>> {
-        const element = await this.findElement(selector);
-        if (!element.success || !element.data) {
-            return { success: false, error: element.error || 'Element not found' };
+    async clickElement(selector: string, method: 'auto' | 'js' | 'focus' = 'auto'): Promise<CDPResult<void>> {
+        const escapedSelector = selector.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
+
+        // Method 1: Scroll into view and click at viewport coordinates
+        if (method === 'auto') {
+            const result = await this.evaluate(`
+                (function() {
+                    const elem = document.querySelector('${escapedSelector}');
+                    if (!elem) return null;
+                    elem.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+                    const rect = elem.getBoundingClientRect();
+                    return { 
+                        x: rect.left + rect.width / 2, 
+                        y: rect.top + rect.height / 2,
+                        width: rect.width,
+                        height: rect.height
+                    };
+                })()
+            `);
+
+            if (result.success && result.data) {
+                const coords = result.data as { x: number; y: number; width: number; height: number };
+                if (coords.width > 0 && coords.height > 0 && coords.x >= 0 && coords.y >= 0) {
+                    await new Promise(r => setTimeout(r, 100));
+                    const clickResult = await this.click(coords.x, coords.y);
+                    if (clickResult.success) return clickResult;
+                }
+            }
         }
 
-        if (!element.data.rect) {
-            return { success: false, error: 'Element has no bounding rect' };
+        // Method 2: JavaScript click() - works when mouse events fail
+        if (method === 'auto' || method === 'js') {
+            console.log('[CDP] Trying JavaScript click fallback');
+            const jsResult = await this.evaluate(`
+                (function() {
+                    const elem = document.querySelector('${escapedSelector}');
+                    if (!elem) return { success: false };
+                    elem.click();
+                    return { success: true };
+                })()
+            `);
+            if (jsResult.success && (jsResult.data as { success: boolean })?.success) {
+                return { success: true };
+            }
         }
 
-        const x = element.data.rect.x + element.data.rect.width / 2;
-        const y = element.data.rect.y + element.data.rect.height / 2;
+        // Method 3: Focus + Enter - works for buttons and links
+        if (method === 'auto' || method === 'focus') {
+            console.log('[CDP] Trying focus + Enter fallback');
+            const focusResult = await this.evaluate(`
+                (function() {
+                    const elem = document.querySelector('${escapedSelector}');
+                    if (!elem) return false;
+                    elem.focus();
+                    return true;
+                })()
+            `);
+            if (focusResult.success && focusResult.data) {
+                await new Promise(r => setTimeout(r, 50));
+                await this.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter' });
+                await this.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter' });
+                return { success: true };
+            }
+        }
 
-        return this.click(x, y);
+        return { success: false, error: `All click methods failed for: ${selector}` };
     }
 
     /**
@@ -224,7 +279,7 @@ export class CDPClient {
     }
 
     /**
-     * Type into element
+     * Type into element (clears existing content first)
      */
     async typeInElement(selector: string, text: string): Promise<CDPResult<void>> {
         const clickResult = await this.clickElement(selector);
@@ -235,6 +290,35 @@ export class CDPClient {
         // Wait for focus
         await new Promise((resolve) => setTimeout(resolve, 100));
 
+        // Clear existing content with Ctrl+A then Backspace
+        // Ctrl+A to select all
+        await this.send('Input.dispatchKeyEvent', {
+            type: 'keyDown',
+            key: 'a',
+            code: 'KeyA',
+            modifiers: 2,  // Ctrl modifier
+        });
+        await this.send('Input.dispatchKeyEvent', {
+            type: 'keyUp',
+            key: 'a',
+            code: 'KeyA',
+        });
+
+        // Backspace to delete selected content
+        await this.send('Input.dispatchKeyEvent', {
+            type: 'keyDown',
+            key: 'Backspace',
+            code: 'Backspace',
+        });
+        await this.send('Input.dispatchKeyEvent', {
+            type: 'keyUp',
+            key: 'Backspace',
+            code: 'Backspace',
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // Now type the new text
         return this.type(text);
     }
 
@@ -333,7 +417,7 @@ export class CDPClient {
     }
 
     /**
-     * Get all clickable elements on page
+     * Get all interactive elements on page (for browser automation)
      */
     async getClickableElements(): Promise<CDPResult<ElementInfo[]>> {
         const docResult = await this.send<{ root: { nodeId: number } }>('DOM.getDocument');
@@ -341,8 +425,12 @@ export class CDPClient {
             return { success: false, error: docResult.error };
         }
 
-        // Query for interactive elements
+        // Query for all interactive elements including inputs
         const selectors = [
+            'input:not([type="hidden"])',  // Text inputs, search, etc.
+            'textarea',
+            'select',
+            '[contenteditable="true"]',
             'a[href]',
             'button',
             'input[type="button"]',
@@ -350,9 +438,12 @@ export class CDPClient {
             '[onclick]',
             '[role="button"]',
             '[role="link"]',
+            '[role="textbox"]',
         ];
 
         const elements: ElementInfo[] = [];
+        const seenNodeIds = new Set<number>();
+        let elementIndex = 0;
 
         for (const selector of selectors) {
             try {
@@ -364,12 +455,108 @@ export class CDPClient {
                     }
                 );
 
-                if (queryResult.success && queryResult.data) {
-                    for (const nodeId of queryResult.data.nodeIds.slice(0, 20)) {
-                        const element = await this.findElement(`[data-nodeId="${nodeId}"]`);
-                        if (element.success && element.data) {
-                            elements.push(element.data);
+                if (!queryResult.success || !queryResult.data) continue;
+
+                for (const nodeId of queryResult.data.nodeIds) {
+                    // Skip if already seen (element may match multiple selectors)
+                    if (seenNodeIds.has(nodeId)) continue;
+                    seenNodeIds.add(nodeId);
+
+                    // Limit total elements
+                    if (elements.length >= 30) break;
+
+                    try {
+                        // Get node details directly using nodeId
+                        const nodeResult = await this.send<{
+                            node: {
+                                nodeId: number;
+                                backendNodeId: number;
+                                nodeName: string;
+                                attributes?: string[];
+                            };
+                        }>('DOM.describeNode', { nodeId });
+
+                        if (!nodeResult.success || !nodeResult.data) continue;
+
+                        // Get bounding box
+                        const boxResult = await this.send<{
+                            model: {
+                                content: number[];
+                                width: number;
+                                height: number;
+                            };
+                        }>('DOM.getBoxModel', { nodeId });
+
+                        let rect: DOMRect | null = null;
+                        if (boxResult.success && boxResult.data) {
+                            const content = boxResult.data.model.content;
+                            rect = new DOMRect(
+                                content[0],
+                                content[1],
+                                boxResult.data.model.width,
+                                boxResult.data.model.height
+                            );
                         }
+
+                        // Skip elements not visible (zero size or off-screen)
+                        if (!rect || rect.width === 0 || rect.height === 0) continue;
+                        if (rect.x < 0 || rect.y < 0 || rect.x > 2000 || rect.y > 2000) continue;
+
+                        // Parse attributes
+                        const attributes: Record<string, string> = {};
+                        const attrList = nodeResult.data.node.attributes || [];
+                        for (let i = 0; i < attrList.length; i += 2) {
+                            attributes[attrList[i]] = attrList[i + 1];
+                        }
+
+                        // Build a usable selector
+                        const tagName = nodeResult.data.node.nodeName.toLowerCase();
+                        let bestSelector = tagName;
+
+                        if (attributes['id']) {
+                            bestSelector = `#${attributes['id']}`;
+                        } else if (attributes['name']) {
+                            bestSelector = `${tagName}[name="${attributes['name']}"]`;
+                        } else if (attributes['data-testid']) {
+                            bestSelector = `[data-testid="${attributes['data-testid']}"]`;
+                        } else if (attributes['aria-label']) {
+                            bestSelector = `[aria-label="${attributes['aria-label']}"]`;
+                        } else if (attributes['class']) {
+                            const firstClass = attributes['class'].split(' ')[0];
+                            if (firstClass && !firstClass.includes(':')) {
+                                bestSelector = `${tagName}.${firstClass}`;
+                            }
+                        }
+
+                        // Get text content (for display)
+                        let textContent = '';
+                        const textResult = await this.send<{ outerHTML: string }>('DOM.getOuterHTML', { nodeId });
+                        if (textResult.success && textResult.data) {
+                            // Extract visible text only
+                            const html = textResult.data.outerHTML;
+                            const textMatch = html.match(/>([^<]{1,50})</);
+                            textContent = textMatch ? textMatch[1].trim() : '';
+                            // Use placeholder/value for inputs
+                            if (!textContent && attributes['placeholder']) {
+                                textContent = attributes['placeholder'];
+                            }
+                            if (!textContent && attributes['value']) {
+                                textContent = attributes['value'];
+                            }
+                        }
+
+                        elementIndex++;
+                        elements.push({
+                            nodeId,
+                            backendNodeId: nodeResult.data.node.backendNodeId,
+                            selector: bestSelector,
+                            tagName,
+                            text: textContent.slice(0, 50),
+                            rect,
+                            attributes,
+                        });
+                    } catch {
+                        // Skip this element on error
                     }
                 }
             } catch {
@@ -377,6 +564,7 @@ export class CDPClient {
             }
         }
 
+        console.log(`[CDP] Found ${elements.length} interactive elements`);
         return { success: true, data: elements };
     }
 

@@ -28,6 +28,10 @@ const consoleLogs = new Map<number, Array<{ level: string; text: string; timesta
 // Panel state tracking
 const panelState = new Map<number, boolean>();
 
+// Session action log for tracking progress (accessible by sendObservation)
+let sessionActionLog: { action: string; selector: string; success: boolean; url: string }[] = [];
+let currentSessionGoal = '';
+
 /**
  * Initialize bridge connection
  */
@@ -76,11 +80,127 @@ async function initBridgeConnection(): Promise<boolean> {
         }).catch(() => { });
     };
 
+    // Handler for server-triggered automation (from CLI)
+    bridgeClient.onStartAutomation = async (goal, sessionId) => {
+        console.log(`[PraisonAI] Starting automation from server: ${goal}`);
+
+        // Get current active tab or find a suitable one
+        let tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        let tab = tabs[0];
+
+        // If no tab or tab is a chrome:// URL, create a new tab
+        if (!tab?.id || tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://')) {
+            console.log('[PraisonAI] Active tab is not suitable, creating new tab');
+            tab = await chrome.tabs.create({ url: 'https://www.google.com', active: true });
+
+            // Wait for tab to fully load using onUpdated listener
+            if (tab.id) {
+                const tabId = tab.id;
+                await new Promise<void>((resolve) => {
+                    const onUpdated = (id: number, info: chrome.tabs.TabChangeInfo) => {
+                        if (id === tabId && info.status === 'complete') {
+                            chrome.tabs.onUpdated.removeListener(onUpdated);
+                            resolve();
+                        }
+                    };
+                    chrome.tabs.onUpdated.addListener(onUpdated);
+                    // Fallback timeout
+                    setTimeout(() => {
+                        chrome.tabs.onUpdated.removeListener(onUpdated);
+                        resolve();
+                    }, 10000);
+                });
+                console.log('[PraisonAI] New tab loaded');
+            }
+        }
+
+        if (!tab?.id) {
+            console.error('[PraisonAI] No suitable tab for automation');
+            return;
+        }
+
+        // Create CDP client for this tab
+        const cdpResult = await createCDPClient(tab.id);
+        if (!cdpResult.success || !cdpResult.data) {
+            console.error('[PraisonAI] Failed to create CDP client:', cdpResult.error);
+            return;
+        }
+        const cdpClient = cdpResult.data;
+        cdpSessions.set(tab.id, cdpClient);
+
+        // Setup the bridge client with CDP
+        bridgeClient.setCDPClient(cdpClient);
+
+        // Reset session state
+        sessionActionLog.length = 0;
+        currentSessionGoal = goal;
+
+        // *** FIX: Setup action handler for CLI-triggered automation ***
+        // This was missing - without it, actions from LLM are silently dropped
+        const tabId = tab.id!;
+        bridgeClient.onAction = async (action) => {
+            console.log('[PraisonAI] CLI action received:', action.action);
+
+            // Check for completion
+            if (action.done || action.action === 'done') {
+                console.log('[PraisonAI] CLI task completed');
+                return;
+            }
+
+            // Track step
+            const currentStep = (bridgeClient?.currentStep || 0) + 1;
+            console.log(`[PraisonAI] CLI Step ${currentStep}`);
+
+            // Log action
+            const selector = action.selector || action.element || '';
+            sessionActionLog.push({
+                action: action.action,
+                selector,
+                success: true,
+                url: '',
+            });
+
+            // Execute the action
+            try {
+                const result = await bridgeClient!.executeAction(action);
+
+                // Update success status
+                if (sessionActionLog.length > 0) {
+                    sessionActionLog[sessionActionLog.length - 1].success = result.success;
+                    sessionActionLog[sessionActionLog.length - 1].error = result.error;
+                }
+
+                // Send next observation to continue the loop
+                await sendObservationToBridge(tabId, goal, cdpClient, result.error);
+            } catch (error) {
+                console.error('[PraisonAI] CLI action error:', error);
+                // Still send observation to let agent recover
+                await sendObservationToBridge(tabId, goal, cdpClient, String(error));
+            }
+        };
+
+        // Send first observation to server to start the loop
+        await sendObservationToBridge(tab.id, goal, cdpClient);
+    };
+
     return bridgeClient.connect();
 }
 
 // Try to connect to bridge server on startup
 initBridgeConnection().catch(console.error);
+
+// Setup periodic reconnection check using chrome.alarms
+chrome.alarms.create('bridgeReconnect', { periodInMinutes: 0.5 }); // Every 30 seconds
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'bridgeReconnect') {
+        // If not connected, try to reconnect
+        if (!bridgeConnected && bridgeClient) {
+            console.log('[PraisonAI] Attempting periodic reconnection...');
+            bridgeClient.connect().catch(console.error);
+        }
+    }
+});
 
 /**
  * Side Panel lifecycle events (Chrome 141+)
@@ -411,13 +531,25 @@ async function startAgent(tabId: number, goal: string) {
     if (bridgeClient && bridgeConnected) {
         console.log('[PraisonAI] Starting session via bridge server');
 
+        // Reset session state
+        sessionActionLog = [];
+        currentSessionGoal = goal;
+
         // Start session with bridge
         await bridgeClient.startSession(goal);
         bridgeClient.setCDPClient(client);
 
-        // Setup action handler
+        // Setup action handler with retry detection
+        const actionHistory: { action: string; selector: string; count: number }[] = [];
+        let lastActionResult: { success: boolean; error?: string } | null = null;
+
         bridgeClient.onAction = async (action) => {
             console.log('[PraisonAI] Received action:', action);
+
+            // Track steps
+            const currentStep = (bridgeClient?.currentStep || 0) + 1;
+            const MAX_STEPS = 15;
+            console.log(`[PraisonAI] Step ${currentStep}/${MAX_STEPS}`);
 
             // Notify side panel
             chrome.runtime.sendMessage({
@@ -432,17 +564,84 @@ async function startAgent(tabId: number, goal: string) {
                 },
             }).catch(() => { });
 
+            // Check for completion or max steps
+            if (action.done || action.action === 'done') {
+                console.log('[PraisonAI] Task completed, stopping agent');
+                stopAgent(tabId);
+                return;
+            }
+
+            if (currentStep >= MAX_STEPS) {
+                console.log('[PraisonAI] Max steps reached, stopping agent');
+                stopAgent(tabId);
+                return;
+            }
+
+            // Track repeated actions to detect loops
+            // Normalize selector (server sends 'element' or 'selector')
+            const actionSelector = action.selector || action.element || '';
+            const actionKey = `${action.action}:${actionSelector}`;
+            const lastHistoryEntry = actionHistory[actionHistory.length - 1];
+
+            if (lastHistoryEntry && lastHistoryEntry.action === action.action && lastHistoryEntry.selector === actionSelector) {
+                lastHistoryEntry.count++;
+                console.log(`[PraisonAI] Repeated action detected: ${actionKey} (${lastHistoryEntry.count} times)`);
+
+                // If repeated 2+ times, try alternate click method
+                if (lastHistoryEntry.count >= 2 && action.action === 'click') {
+                    console.log('[PraisonAI] Switching to JavaScript click fallback');
+                    action.clickMethod = 'js';  // Signal to use JS click
+                }
+
+                // If repeated 3+ times on a button, just try pressing Enter
+                if (lastHistoryEntry.count >= 3 && (actionSelector.includes('btn') || actionSelector.includes('submit') || actionSelector.includes('search'))) {
+                    console.log('[PraisonAI] Button click failed 3x, falling back to Enter key');
+                    action.action = 'submit';  // Convert to Enter press
+                }
+            } else {
+                actionHistory.push({ action: action.action, selector: actionSelector, count: 1 });
+            }
+
             // Execute the action
             try {
-                await bridgeClient!.executeAction(action);
+                const pageState = await client.getPageState();
+                const currentUrl = pageState.data?.url || '';
 
-                // If not done, send next observation
-                if (!action.done) {
-                    await sendObservationToBridge(tabId, goal, client);
-                }
+                const result = await bridgeClient!.executeAction(action);
+                lastActionResult = { success: result.success, error: result.error };
+
+                // Log to session action log for progress tracking
+                sessionActionLog.push({
+                    action: action.action,
+                    selector: actionSelector,
+                    success: result.success,
+                    url: currentUrl,
+                    error: result.error,  // Include error message
+                });
+
+                // Send next observation with last action result (including error)
+                await sendObservationToBridge(tabId, goal, client, result.error);
             } catch (error) {
                 console.error('[PraisonAI] Action failed:', error);
+                lastActionResult = { success: false, error: String(error) };
+                sessionActionLog.push({
+                    action: action.action,
+                    selector: actionSelector,
+                    success: false,
+                    url: '',
+                });
             }
+        };
+
+        // Setup completion handler
+        bridgeClient.onComplete = (summary) => {
+            console.log('[PraisonAI] Task completed with summary:', summary);
+            // Notify side panel of completion
+            chrome.runtime.sendMessage({
+                type: 'AGENT_COMPLETE',
+                tabId,
+                summary,
+            }).catch(() => { });
         };
 
         // Send initial observation to start the loop
@@ -474,7 +673,7 @@ async function startAgent(tabId: number, goal: string) {
 /**
  * Send observation to bridge server
  */
-async function sendObservationToBridge(tabId: number, goal: string, client: CDPClient) {
+async function sendObservationToBridge(tabId: number, goal: string, client: CDPClient, lastActionError?: string) {
     try {
         // Get page state
         const pageState = await client.getPageState();
@@ -483,28 +682,69 @@ async function sendObservationToBridge(tabId: number, goal: string, client: CDPC
             return;
         }
 
-        // Capture screenshot
-        const screenshot = await client.captureScreenshot();
+        // Capture screenshot (JPEG for smaller size)
+        const screenshot = await client.captureScreenshot('jpeg', 30);
 
-        // Get clickable elements
+        // Get interactive elements
         const elements = await client.getClickableElements();
 
-        // Build elements list for server
-        const elementsList = (elements.data || []).slice(0, 20).map(e => ({
-            selector: e.selector,
-            tag: e.tagName,
-            text: e.text || '',
+        // Build elements list for server with clear type indicators
+        const elementsList = (elements.data || []).slice(0, 15).map((e, i) => {
+            // Determine element type for clarity
+            let typeHint = 'ELEMENT';
+            if (e.tagName === 'a') typeHint = 'LINK';
+            else if (e.tagName === 'button' || e.tagName === 'input' && e.attributes?.type === 'submit') typeHint = 'BUTTON';
+            else if (e.tagName === 'input' || e.tagName === 'textarea') typeHint = 'INPUT';
+            else if (e.tagName === 'select') typeHint = 'SELECT';
+
+            return {
+                index: i + 1,
+                type: typeHint,
+                selector: e.selector,
+                tag: e.tagName,
+                text: e.text || '',
+            };
+        });
+
+        // Log elements for debugging with action hints
+        console.log(`[PraisonAI] Step ${bridgeClient?.currentStep || 0}: ${pageState.data.url}`);
+        console.log(`[PraisonAI] Found ${elementsList.length} elements:`);
+        elementsList.forEach(e => {
+            const actionHint = e.type === 'INPUT' ? '→ type here' :
+                e.type === 'LINK' ? '→ click to navigate' :
+                    e.type === 'BUTTON' ? '→ click to submit' : '';
+            console.log(`  [${e.index}] ${e.type} ${e.selector} "${e.text}" ${actionHint}`);
+        });
+
+        // Build action history summary for agent context
+        const actionHistorySummary = sessionActionLog.slice(-5).map((a, i) => ({
+            step: sessionActionLog.length - 4 + i,
+            action: a.action,
+            selector: a.selector,
+            success: a.success,
+            url: a.url.slice(0, 60),  // Truncate URL
         }));
 
-        // Send observation
+        // Build progress notes to help agent stay on track
+        const progressNotes = sessionActionLog.length > 0
+            ? `PROGRESS: ${sessionActionLog.length} actions completed. Last URL: ${sessionActionLog[sessionActionLog.length - 1]?.url?.slice(0, 50) || 'unknown'}`
+            : 'PROGRESS: 0 actions completed. Just started.';
+
+        // Send observation with full context
         await bridgeClient?.sendObservation({
-            task: goal,
+            task: goal,  // Original goal always included
             url: pageState.data.url,
             title: pageState.data.title,
             screenshot: screenshot.data?.data || '',
             elements: elementsList,
             console_logs: [],
             step_number: bridgeClient?.currentStep || 0,
+            // Add progress context for agent self-correction
+            action_history: actionHistorySummary,
+            progress_notes: progressNotes,
+            original_goal: currentSessionGoal,  // Explicit reminder of original goal
+            // Add last action error for LLM to see failures
+            last_action_error: lastActionError,
         });
     } catch (error) {
         console.error('[PraisonAI] Failed to send observation:', error);
@@ -515,11 +755,21 @@ async function sendObservationToBridge(tabId: number, goal: string, client: CDPC
  * Stop browser agent
  */
 function stopAgent(tabId: number) {
+    console.log('[PraisonAI] Stopping agent for tab', tabId);
+
+    // Stop local agent if exists
     const agent = agents.get(tabId);
     if (agent) {
         agent.stop();
         agents.delete(tabId);
     }
+
+    // Stop bridge session if connected
+    if (bridgeClient && bridgeConnected) {
+        bridgeClient.stopSession();
+        bridgeClient.onAction = null;  // Clear action handler to stop loop
+    }
+
     return { success: true };
 }
 
