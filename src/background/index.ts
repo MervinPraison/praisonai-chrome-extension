@@ -392,7 +392,6 @@ async function evaluate(tabId: number, expression: string) {
     }
     return client.evaluate(expression);
 }
-
 /**
  * Start browser agent
  */
@@ -408,6 +407,52 @@ async function startAgent(tabId: number, goal: string) {
         existingAgent.stop();
     }
 
+    // Try bridge server first (PraisonAI)
+    if (bridgeClient && bridgeConnected) {
+        console.log('[PraisonAI] Starting session via bridge server');
+
+        // Start session with bridge
+        await bridgeClient.startSession(goal);
+        bridgeClient.setCDPClient(client);
+
+        // Setup action handler
+        bridgeClient.onAction = async (action) => {
+            console.log('[PraisonAI] Received action:', action);
+
+            // Notify side panel
+            chrome.runtime.sendMessage({
+                type: 'AGENT_STEP',
+                tabId,
+                step: {
+                    action: {
+                        type: action.action,
+                        reason: action.thought || '',
+                    },
+                    result: { success: true },
+                },
+            }).catch(() => { });
+
+            // Execute the action
+            try {
+                await bridgeClient!.executeAction(action);
+
+                // If not done, send next observation
+                if (!action.done) {
+                    await sendObservationToBridge(tabId, goal, client);
+                }
+            } catch (error) {
+                console.error('[PraisonAI] Action failed:', error);
+            }
+        };
+
+        // Send initial observation to start the loop
+        await sendObservationToBridge(tabId, goal, client);
+
+        return { success: true, data: 'Agent started via PraisonAI bridge' };
+    }
+
+    // Fallback to local agent (built-in AI)
+    console.log('[PraisonAI] Bridge unavailable, using local agent');
     const agent = new BrowserAgent(client);
     agents.set(tabId, agent);
 
@@ -424,6 +469,46 @@ async function startAgent(tabId: number, goal: string) {
     });
 
     return { success: true, data: 'Agent started' };
+}
+
+/**
+ * Send observation to bridge server
+ */
+async function sendObservationToBridge(tabId: number, goal: string, client: CDPClient) {
+    try {
+        // Get page state
+        const pageState = await client.getPageState();
+        if (!pageState.success || !pageState.data) {
+            console.error('[PraisonAI] Failed to get page state');
+            return;
+        }
+
+        // Capture screenshot
+        const screenshot = await client.captureScreenshot();
+
+        // Get clickable elements
+        const elements = await client.getClickableElements();
+
+        // Build elements list for server
+        const elementsList = (elements.data || []).slice(0, 20).map(e => ({
+            selector: e.selector,
+            tag: e.tagName,
+            text: e.text || '',
+        }));
+
+        // Send observation
+        await bridgeClient?.sendObservation({
+            task: goal,
+            url: pageState.data.url,
+            title: pageState.data.title,
+            screenshot: screenshot.data?.data || '',
+            elements: elementsList,
+            console_logs: [],
+            step_number: bridgeClient?.currentStep || 0,
+        });
+    } catch (error) {
+        console.error('[PraisonAI] Failed to send observation:', error);
+    }
 }
 
 /**
