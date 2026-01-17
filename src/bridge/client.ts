@@ -619,7 +619,17 @@ export class BridgeClient {
                     this.stopped = false;
 
                     // Trigger handler with info about whether previous session existed
-                    this.onStartAutomation?.(startMsg.goal, startMsg.session_id, hadPreviousSession);
+                    // *** FIX: Properly await and catch errors from async handler ***
+                    if (this.onStartAutomation) {
+                        (async () => {
+                            try {
+                                await this.onStartAutomation!(startMsg.goal, startMsg.session_id, hadPreviousSession);
+                            } catch (error) {
+                                console.error('[Bridge] onStartAutomation handler error:', error);
+                                this.onError?.(`Automation start failed: ${error}`);
+                            }
+                        })();
+                    }
                     break;
 
                 case 'reload_extension':
@@ -627,6 +637,7 @@ export class BridgeClient {
                     console.log('[Bridge] Reloading extension by server request...');
                     chrome.runtime.reload();
                     break;
+
 
                 default:
                     console.log('[Bridge] Unknown message type:', message.type);

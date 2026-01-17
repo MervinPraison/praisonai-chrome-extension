@@ -282,136 +282,158 @@ async function initBridgeConnection(): Promise<boolean> {
 
     // Handler for server-triggered automation (from CLI)
     bridgeClient.onStartAutomation = async (goal, sessionId, hadPreviousSession) => {
-        console.log(`[PraisonAI] Starting automation from server: ${goal}`);
-        console.log(`[PraisonAI] hadPreviousSession=${hadPreviousSession}, lastSessionTabId=${lastSessionTabId}`);
+        try {
+            console.log(`[PraisonAI] Starting automation from server: ${goal}`);
+            console.log(`[PraisonAI] sessionId=${sessionId}, hadPreviousSession=${hadPreviousSession}, lastSessionTabId=${lastSessionTabId}`);
 
-        // *** FIX: Always cleanup CDP between sessions ***
-        // After normal completion: stopped=true (so hadPreviousSession=false) AND lastSessionTabId=null
-        // So we must ALWAYS run cleanup and ensure state is correct for new session
-        console.log(`[PraisonAI] Session cleanup - hadPreviousSession=${hadPreviousSession}, lastSessionTabId=${lastSessionTabId}`);
+            // *** FIX: Always cleanup CDP between sessions ***
+            // After normal completion: stopped=true (so hadPreviousSession=false) AND lastSessionTabId=null
+            // So we must ALWAYS run cleanup and ensure state is correct for new session
+            console.log(`[PraisonAI] Session cleanup - hadPreviousSession=${hadPreviousSession}, lastSessionTabId=${lastSessionTabId}`);
 
-        // Ensure no stale CDP is attached (ALWAYS run this)
-        await ensureNoActiveDebugger(lastSessionTabId || undefined);
+            // Ensure no stale CDP is attached (ALWAYS run this)
+            await ensureNoActiveDebugger(lastSessionTabId || undefined);
 
-        // Always wait for any previous session to fully complete
-        await new Promise(resolve => setTimeout(resolve, 500));
 
-        // Get current active tab or find a suitable one
-        let tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        let tab = tabs[0];
+            // Always wait for any previous session to fully complete
+            await new Promise(resolve => setTimeout(resolve, 500));
 
-        // If no tab or tab is a chrome:// URL, create a new tab
-        if (!tab?.id || tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://')) {
-            console.log('[PraisonAI] Active tab is not suitable, creating new tab');
-            tab = await chrome.tabs.create({ url: 'https://www.google.com', active: true });
+            // Get current active tab or find a suitable one
+            let tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            let tab = tabs[0];
 
-            // Wait for tab to fully load using onUpdated listener
-            if (tab.id) {
-                const tabId = tab.id;
-                await new Promise<void>((resolve) => {
-                    const onUpdated = (id: number, info: chrome.tabs.TabChangeInfo) => {
-                        if (id === tabId && info.status === 'complete') {
+            // If no tab or tab is a chrome:// URL, create a new tab
+            if (!tab?.id || tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://')) {
+                console.log('[PraisonAI] Active tab is not suitable, creating new tab');
+                tab = await chrome.tabs.create({ url: 'https://www.google.com', active: true });
+
+                // Wait for tab to fully load using onUpdated listener
+                if (tab.id) {
+                    const tabId = tab.id;
+                    await new Promise<void>((resolve) => {
+                        const onUpdated = (id: number, info: chrome.tabs.TabChangeInfo) => {
+                            if (id === tabId && info.status === 'complete') {
+                                chrome.tabs.onUpdated.removeListener(onUpdated);
+                                resolve();
+                            }
+                        };
+                        chrome.tabs.onUpdated.addListener(onUpdated);
+                        // Fallback timeout
+                        setTimeout(() => {
                             chrome.tabs.onUpdated.removeListener(onUpdated);
                             resolve();
-                        }
-                    };
-                    chrome.tabs.onUpdated.addListener(onUpdated);
-                    // Fallback timeout
-                    setTimeout(() => {
-                        chrome.tabs.onUpdated.removeListener(onUpdated);
-                        resolve();
-                    }, 10000);
-                });
-                console.log('[PraisonAI] New tab loaded');
-            }
-        }
-
-        if (!tab?.id) {
-            console.error('[PraisonAI] No suitable tab for automation');
-            return;
-        }
-
-        // *** FIX: Ensure no previous debugger is attached ***
-        await ensureNoActiveDebugger(tab.id);
-
-        // Create CDP client for this tab
-        const cdpResult = await createCDPClient(tab.id);
-        if (!cdpResult.success || !cdpResult.data) {
-            console.error('[PraisonAI] Failed to create CDP client:', cdpResult.error);
-            return;
-        }
-        const cdpClient = cdpResult.data;
-        cdpSessions.set(tab.id, cdpClient);
-        lastSessionTabId = tab.id;  // Track for cleanup
-
-        // *** FIX: Persist session state in chrome.storage.session ***
-        await setSessionState({
-            activeTabId: tab.id,
-            sessionId: sessionId,
-            isActive: true,
-        });
-
-        // Setup the bridge client with CDP
-        bridgeClient.setCDPClient(cdpClient);
-
-        // Reset session state
-        sessionActionLog.length = 0;
-        currentSessionGoal = goal;
-
-        // *** FIX: Setup action handler for CLI-triggered automation ***
-        // This was missing - without it, actions from LLM are silently dropped
-        const tabId = tab.id!;
-        bridgeClient.onAction = async (action) => {
-            console.log('[PraisonAI] CLI action received:', action.action);
-
-            // Check for completion
-            if (action.done || action.action === 'done') {
-                console.log('[PraisonAI] CLI task completed - stopping session');
-                // Clean up CDP before ending session
-                const client = cdpSessions.get(tabId);
-                if (client) {
-                    client.disconnect().catch(() => { });
-                    cdpSessions.delete(tabId);
+                        }, 10000);
+                    });
+                    console.log('[PraisonAI] New tab loaded');
                 }
-                // Properly end the session
-                await bridgeClient?.stopSession();
+            }
+
+            if (!tab?.id) {
+                console.error('[PraisonAI] No suitable tab for automation');
                 return;
             }
 
-            // Track step
-            const currentStep = (bridgeClient?.currentStep || 0) + 1;
-            console.log(`[PraisonAI] CLI Step ${currentStep}`);
+            // *** FIX: Ensure no previous debugger is attached ***
+            await ensureNoActiveDebugger(tab.id);
 
-            // Log action
-            const selector = action.selector || action.element || '';
-            sessionActionLog.push({
-                action: action.action,
-                selector,
-                success: true,
-                url: '',
+            // Create CDP client for this tab
+            const cdpResult = await createCDPClient(tab.id);
+            if (!cdpResult.success || !cdpResult.data) {
+                console.error('[PraisonAI] Failed to create CDP client:', cdpResult.error);
+                return;
+            }
+            const cdpClient = cdpResult.data;
+            cdpSessions.set(tab.id, cdpClient);
+            lastSessionTabId = tab.id;  // Track for cleanup
+
+            // *** FIX: Persist session state in chrome.storage.session ***
+            await setSessionState({
+                activeTabId: tab.id,
+                sessionId: sessionId,
+                isActive: true,
             });
 
-            // Execute the action
-            try {
-                const result = await bridgeClient!.executeAction(action);
+            // Setup the bridge client with CDP
+            bridgeClient.setCDPClient(cdpClient);
 
-                // Update success status
-                if (sessionActionLog.length > 0) {
-                    sessionActionLog[sessionActionLog.length - 1].success = result.success;
-                    sessionActionLog[sessionActionLog.length - 1].error = result.error;
+            // Reset session state
+            sessionActionLog.length = 0;
+            currentSessionGoal = goal;
+
+            // *** FIX: Setup action handler for CLI-triggered automation ***
+            // This was missing - without it, actions from LLM are silently dropped
+            const tabId = tab.id!;
+            bridgeClient.onAction = async (action) => {
+                console.log('[PraisonAI] CLI action received:', action.action);
+
+                // Check for completion
+                if (action.done || action.action === 'done') {
+                    console.log('[PraisonAI] CLI task completed - stopping session');
+                    // Clean up CDP before ending session
+                    const client = cdpSessions.get(tabId);
+                    if (client) {
+                        client.disconnect().catch(() => { });
+                        cdpSessions.delete(tabId);
+                    }
+                    // Properly end the session
+                    await bridgeClient?.stopSession();
+                    return;
                 }
 
-                // Send next observation to continue the loop
-                await sendObservationToBridge(tabId, goal, cdpClient, result.error);
-            } catch (error) {
-                console.error('[PraisonAI] CLI action error:', error);
-                // Still send observation to let agent recover
-                await sendObservationToBridge(tabId, goal, cdpClient, String(error));
-            }
-        };
+                // Track step
+                const currentStep = (bridgeClient?.currentStep || 0) + 1;
+                console.log(`[PraisonAI] CLI Step ${currentStep}`);
 
-        // Send first observation to server to start the loop
-        await sendObservationToBridge(tab.id, goal, cdpClient);
+                // Log action
+                const selector = action.selector || action.element || '';
+                sessionActionLog.push({
+                    action: action.action,
+                    selector,
+                    success: true,
+                    url: '',
+                });
+
+                // Execute the action
+                try {
+                    const result = await bridgeClient!.executeAction(action);
+
+                    // Update success status
+                    if (sessionActionLog.length > 0) {
+                        sessionActionLog[sessionActionLog.length - 1].success = result.success;
+                        sessionActionLog[sessionActionLog.length - 1].error = result.error;
+                    }
+
+                    // Send next observation to continue the loop
+                    await sendObservationToBridge(tabId, goal, cdpClient, result.error);
+                } catch (error) {
+                    console.error('[PraisonAI] CLI action error:', error);
+                    // Still send observation to let agent recover
+                    await sendObservationToBridge(tabId, goal, cdpClient, String(error));
+                }
+            };
+
+            // Send first observation to server to start the loop
+            console.log('[PraisonAI] About to send first observation to bridge');
+            await sendObservationToBridge(tab.id, goal, cdpClient);
+            console.log('[PraisonAI] First observation sent successfully');
+        } catch (error) {
+            console.error('[PraisonAI] onStartAutomation FATAL ERROR:', error);
+            // Try to notify the bridge of the error
+            try {
+                bridgeClient?.sendObservation({
+                    task: goal,
+                    url: 'error',
+                    title: 'Error',
+                    screenshot: '',
+                    elements: [],
+                    console_logs: [],
+                    step_number: 0,
+                    error: `Extension error: ${error}`,
+                } as any);
+            } catch (e) {
+                console.error('[PraisonAI] Failed to send error observation:', e);
+            }
+        }
     };
 
     return bridgeClient.connect();
