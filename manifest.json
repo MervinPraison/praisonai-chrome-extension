@@ -3,7 +3,7 @@
     "name": "PraisonAI Browser Agent",
     "version": "1.0.0",
     "description": "AI-powered browser automation with on-device AI. Navigate, click, type, screenshot, and control your browser with natural language.",
-    "author": "PraisonAI",
+    "author": "MervinPraison",
     "homepage_url": "https://docs.praison.ai",
     "minimum_chrome_version": "114",
     "permissions": [
