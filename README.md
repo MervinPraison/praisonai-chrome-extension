@@ -19,6 +19,21 @@ AI-powered browser automation with Side Panel and Built-in AI (Gemini Nano).
 - macOS 13+, Windows 10/11, or Linux
 - 22 GB free storage (for Gemini Nano model)
 
+## Quick Install
+
+### Download Pre-built Extension
+
+1. Go to [GitHub Actions](https://github.com/MervinPraison/praisonai-chrome-extension/actions)
+2. Click the latest successful **Build Extension** workflow
+3. Download the `praisonai-extension` artifact
+4. Unzip the downloaded file
+5. Open `chrome://extensions` in Chrome
+6. Enable **Developer mode** (top right toggle)
+7. Click **Load unpacked**
+8. Select the unzipped folder
+
+> **Note:** The extension will also be available on Chrome Web Store once approved.
+
 ## Installation
 
 ### Development
