@@ -21,16 +21,23 @@ AI-powered browser automation with Side Panel and Built-in AI (Gemini Nano).
 
 ## Quick Install
 
-### Download Pre-built Extension
+### Option 1: Direct Download (Recommended)
+
+[![Download Extension](https://img.shields.io/badge/Download-Extension-blue?style=for-the-badge&logo=googlechrome)](https://github.com/MervinPraison/praisonai-chrome-extension/releases/latest/download/praisonai-extension.zip)
+
+1. **[Download praisonai-extension.zip](https://github.com/MervinPraison/praisonai-chrome-extension/releases/latest/download/praisonai-extension.zip)**
+2. Unzip the downloaded file
+3. Open `chrome://extensions` in Chrome
+4. Enable **Developer mode** (top right toggle)
+5. Click **Load unpacked**
+6. Select the unzipped folder
+
+### Option 2: From GitHub Actions (Latest Build)
 
 1. Go to [GitHub Actions](https://github.com/MervinPraison/praisonai-chrome-extension/actions)
 2. Click the latest successful **Build Extension** workflow
 3. Download the `praisonai-extension` artifact
-4. Unzip the downloaded file
-5. Open `chrome://extensions` in Chrome
-6. Enable **Developer mode** (top right toggle)
-7. Click **Load unpacked**
-8. Select the unzipped folder
+4. Follow steps 2-6 above
 
 > **Note:** The extension will also be available on Chrome Web Store once approved.
 

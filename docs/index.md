@@ -2,6 +2,14 @@
 
 AI-powered browser automation with Side Panel and Built-in AI (Gemini Nano).
 
+## ⬇️ Download
+
+<a href="https://github.com/MervinPraison/praisonai-chrome-extension/releases/latest/download/praisonai-extension.zip" class="md-button md-button--primary">
+  Download Latest Release
+</a>
+
+Or get it from [GitHub Releases](https://github.com/MervinPraison/praisonai-chrome-extension/releases)
+
 ## Features
 
 - 🤖 **Browser Agent** - Project Mariner-style AI agent

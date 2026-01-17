@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Create zip package
+        run: |
+          cd dist
+          zip -r ../praisonai-extension.zip .
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: PraisonAI Browser Agent v${{ steps.version.outputs.version }}
+          body: |
+            ## 🚀 PraisonAI Browser Agent v${{ steps.version.outputs.version }}
+            
+            ### Installation
+            
+            1. Download `praisonai-extension.zip` below
+            2. Unzip the file
+            3. Open `chrome://extensions` in Chrome
+            4. Enable **Developer mode** (top right)
+            5. Click **Load unpacked**
+            6. Select the unzipped folder
+            
+            ### Features
+            - 🤖 AI-powered browser automation
+            - 🧠 On-device Gemini Nano support
+            - 🎯 Natural language task execution
+            - 📸 Screenshot capture for AI vision
+            
+            [Documentation](https://mervinpraison.github.io/praisonai-chrome-extension/)
+          files: |
+            praisonai-extension.zip
+          draft: false
+          prerelease: false
