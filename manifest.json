@@ -5,7 +5,7 @@
     "description": "AI-powered browser automation with on-device AI. Navigate, click, type, screenshot, and control your browser with natural language.",
     "author": "PraisonAI",
     "homepage_url": "https://docs.praison.ai",
-    "minimum_chrome_version": "138",
+    "minimum_chrome_version": "114",
     "permissions": [
         "sidePanel",
         "activeTab",
@@ -15,7 +15,8 @@
         "storage",
         "contextMenus",
         "notifications",
-        "offscreen"
+        "offscreen",
+        "tabCapture"
     ],
     "optional_permissions": [
         "history",
@@ -38,8 +39,8 @@
         },
         "capture-screenshot": {
             "suggested_key": {
-                "default": "Alt+S",
-                "mac": "Option+S"
+                "default": "Ctrl+Shift+S",
+                "mac": "Command+Shift+S"
             },
             "description": "Capture screenshot"
         }
@@ -91,7 +92,7 @@
         }
     ],
     "content_security_policy": {
-        "extension_pages": "script-src 'self'; object-src 'self'"
+        "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://localhost:* http://localhost:*"
     },
     "externally_connectable": {
         "matches": [

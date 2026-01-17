@@ -1,13 +1,15 @@
 /**
- * Built-in AI Integration using Gemini Nano
+ * Built-in AI Integration using Gemini Nano (Chrome 138+ Stable APIs)
  * 
  * Provides access to Chrome's built-in AI APIs:
- * - Prompt API (general LLM prompts)
- * - Summarizer API
- * - Writer API
- * - Rewriter API
- * - Translator API
- * - Language Detector API
+ * - LanguageModel API (Prompt API - stable in Chrome 138+ for extensions)
+ * - Summarizer API (stable in Chrome 138+)
+ * - Writer API (origin trial)
+ * - Rewriter API (origin trial)
+ * - Translator API (stable in Chrome 138+)
+ * - Language Detector API (stable in Chrome 138+)
+ * 
+ * @see https://developer.chrome.com/docs/ai/built-in-apis
  */
 
 export interface AICapabilities {
@@ -31,93 +33,179 @@ export interface AIResult<T = string> {
     error?: string;
 }
 
-// Type definitions for Chrome Built-in AI (not yet in @types/chrome)
+// Type definitions for Chrome Built-in AI (Chrome 138+ stable)
 declare global {
-    interface Window {
-        ai?: {
-            languageModel?: {
-                capabilities(): Promise<{ available: string }>;
-                create(options?: {
-                    temperature?: number;
-                    topK?: number;
-                    systemPrompt?: string;
-                }): Promise<AISession>;
-            };
-            summarizer?: {
-                capabilities(): Promise<{ available: string }>;
-                create(options?: { type?: string; format?: string; length?: string }): Promise<AISummarizer>;
-            };
-            writer?: {
-                capabilities(): Promise<{ available: string }>;
-                create(options?: { tone?: string; format?: string; length?: string }): Promise<AIWriter>;
-            };
-            rewriter?: {
-                capabilities(): Promise<{ available: string }>;
-                create(options?: { tone?: string; format?: string; length?: string }): Promise<AIRewriter>;
-            };
-            translator?: {
-                capabilities(): Promise<{ available: string }>;
-                create(options: { sourceLanguage: string; targetLanguage: string }): Promise<AITranslator>;
-            };
-            languageDetector?: {
-                capabilities(): Promise<{ available: string }>;
-                create(): Promise<AILanguageDetector>;
-            };
-        };
+    interface LanguageModelStatic {
+        availability(): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>;
+        create(options?: {
+            temperature?: number;
+            topK?: number;
+            systemPrompt?: string;
+            monitor?: (m: EventTarget) => void;
+        }): Promise<LanguageModelSession>;
+        params(): Promise<{
+            defaultTemperature: number;
+            maxTemperature: number;
+            defaultTopK: number;
+            maxTopK: number;
+        }>;
     }
 
-    interface AISession {
-        prompt(input: string): Promise<string>;
-        promptStreaming(input: string): AsyncIterable<string>;
+    interface LanguageModelSession {
+        prompt(input: string, options?: { signal?: AbortSignal }): Promise<string>;
+        promptStreaming(input: string, options?: { signal?: AbortSignal }): ReadableStream<string>;
+        destroy(): void;
+        readonly inputUsage: number;
+        readonly inputQuota: number;
+    }
+
+    interface SummarizerStatic {
+        availability(): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>;
+        create(options?: {
+            type?: 'key-points' | 'tldr' | 'teaser' | 'headline';
+            format?: 'markdown' | 'plain-text';
+            length?: 'short' | 'medium' | 'long';
+            sharedContext?: string;
+            monitor?: (m: EventTarget) => void;
+        }): Promise<SummarizerSession>;
+    }
+
+    interface SummarizerSession {
+        summarize(text: string, options?: { context?: string }): Promise<string>;
+        summarizeStreaming(text: string, options?: { context?: string }): ReadableStream<string>;
         destroy(): void;
     }
 
-    interface AISummarizer {
-        summarize(text: string): Promise<string>;
+    interface WriterStatic {
+        availability(): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>;
+        create(options?: {
+            tone?: 'formal' | 'neutral' | 'casual';
+            format?: 'markdown' | 'plain-text';
+            length?: 'short' | 'medium' | 'long';
+            sharedContext?: string;
+            monitor?: (m: EventTarget) => void;
+        }): Promise<WriterSession>;
+    }
+
+    interface WriterSession {
+        write(prompt: string, options?: { context?: string }): Promise<string>;
+        writeStreaming(prompt: string, options?: { context?: string }): ReadableStream<string>;
         destroy(): void;
     }
 
-    interface AIWriter {
-        write(prompt: string): Promise<string>;
+    interface RewriterStatic {
+        availability(): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>;
+        create(options?: {
+            tone?: 'more-formal' | 'as-is' | 'more-casual';
+            format?: 'as-is' | 'markdown' | 'plain-text';
+            length?: 'shorter' | 'as-is' | 'longer';
+            sharedContext?: string;
+            monitor?: (m: EventTarget) => void;
+        }): Promise<RewriterSession>;
+    }
+
+    interface RewriterSession {
+        rewrite(text: string, options?: { context?: string }): Promise<string>;
+        rewriteStreaming(text: string, options?: { context?: string }): ReadableStream<string>;
         destroy(): void;
     }
 
-    interface AIRewriter {
-        rewrite(text: string): Promise<string>;
-        destroy(): void;
+    interface TranslatorStatic {
+        availability(): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>;
+        create(options: {
+            sourceLanguage: string;
+            targetLanguage: string;
+        }): Promise<TranslatorSession>;
     }
 
-    interface AITranslator {
+    interface TranslatorSession {
         translate(text: string): Promise<string>;
         destroy(): void;
     }
 
-    interface AILanguageDetector {
+    interface LanguageDetectorStatic {
+        availability(): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>;
+        create(): Promise<LanguageDetectorSession>;
+    }
+
+    interface LanguageDetectorSession {
         detect(text: string): Promise<Array<{ detectedLanguage: string; confidence: number }>>;
         destroy(): void;
+    }
+
+    // Global API objects (Chrome 138+)
+    const LanguageModel: LanguageModelStatic | undefined;
+    const Summarizer: SummarizerStatic | undefined;
+    const Writer: WriterStatic | undefined;
+    const Rewriter: RewriterStatic | undefined;
+    const Translator: TranslatorStatic | undefined;
+    // Note: window.ai may still exist for backwards compat
+    interface Window {
+        ai?: {
+            languageModel?: LanguageModelStatic;
+            summarizer?: SummarizerStatic;
+            writer?: WriterStatic;
+            rewriter?: RewriterStatic;
+            translator?: TranslatorStatic;
+            languageDetector?: LanguageDetectorStatic;
+        };
     }
 }
 
 /**
- * Chrome Built-in AI Client
+ * Chrome Built-in AI Client (Chrome 138+ stable APIs)
  */
 export class BuiltInAI {
-    private session: AISession | null = null;
+    private session: LanguageModelSession | null = null;
     private capabilities: AICapabilities | null = null;
+
+    /**
+     * Get the LanguageModel API (supports both new global and legacy window.ai)
+     */
+    private getLanguageModel(): LanguageModelStatic | undefined {
+        // Chrome 138+ uses global LanguageModel
+        if (typeof LanguageModel !== 'undefined') {
+            return LanguageModel;
+        }
+        // Fallback to window.ai for backwards compatibility
+        return window.ai?.languageModel;
+    }
+
+    /**
+     * Get the Summarizer API
+     */
+    private getSummarizer(): SummarizerStatic | undefined {
+        if (typeof Summarizer !== 'undefined') {
+            return Summarizer;
+        }
+        return window.ai?.summarizer;
+    }
+
+    /**
+     * Get the Writer API
+     */
+    private getWriter(): WriterStatic | undefined {
+        if (typeof Writer !== 'undefined') {
+            return Writer;
+        }
+        return window.ai?.writer;
+    }
+
+    /**
+     * Get the Rewriter API
+     */
+    private getRewriter(): RewriterStatic | undefined {
+        if (typeof Rewriter !== 'undefined') {
+            return Rewriter;
+        }
+        return window.ai?.rewriter;
+    }
 
     /**
      * Check what AI capabilities are available
      */
     async checkCapabilities(): Promise<AIResult<AICapabilities>> {
         try {
-            const ai = window.ai;
-            if (!ai) {
-                return {
-                    success: false,
-                    error: 'Built-in AI not available. Requires Chrome 138+ with AI enabled.',
-                };
-            }
-
             const capabilities: AICapabilities = {
                 promptApiAvailable: false,
                 summarizerAvailable: false,
@@ -127,38 +215,72 @@ export class BuiltInAI {
                 languageDetectorAvailable: false,
             };
 
-            // Check each API
-            if (ai.languageModel) {
-                const cap = await ai.languageModel.capabilities();
-                capabilities.promptApiAvailable = cap.available === 'readily';
+            // Check LanguageModel (Prompt API)
+            const languageModel = this.getLanguageModel();
+            if (languageModel) {
+                try {
+                    const avail = await languageModel.availability();
+                    capabilities.promptApiAvailable = avail === 'available' || avail === 'downloadable';
+                } catch (e) {
+                    console.warn('[BuiltInAI] LanguageModel check failed:', e);
+                }
             }
 
-            if (ai.summarizer) {
-                const cap = await ai.summarizer.capabilities();
-                capabilities.summarizerAvailable = cap.available === 'readily';
+            // Check Summarizer
+            const summarizer = this.getSummarizer();
+            if (summarizer) {
+                try {
+                    const avail = await summarizer.availability();
+                    capabilities.summarizerAvailable = avail === 'available' || avail === 'downloadable';
+                } catch (e) {
+                    console.warn('[BuiltInAI] Summarizer check failed:', e);
+                }
             }
 
-            if (ai.writer) {
-                const cap = await ai.writer.capabilities();
-                capabilities.writerAvailable = cap.available === 'readily';
+            // Check Writer
+            const writer = this.getWriter();
+            if (writer) {
+                try {
+                    const avail = await writer.availability();
+                    capabilities.writerAvailable = avail === 'available' || avail === 'downloadable';
+                } catch (e) {
+                    console.warn('[BuiltInAI] Writer check failed:', e);
+                }
             }
 
-            if (ai.rewriter) {
-                const cap = await ai.rewriter.capabilities();
-                capabilities.rewriterAvailable = cap.available === 'readily';
+            // Check Rewriter
+            const rewriter = this.getRewriter();
+            if (rewriter) {
+                try {
+                    const avail = await rewriter.availability();
+                    capabilities.rewriterAvailable = avail === 'available' || avail === 'downloadable';
+                } catch (e) {
+                    console.warn('[BuiltInAI] Rewriter check failed:', e);
+                }
             }
 
-            if (ai.translator) {
-                const cap = await ai.translator.capabilities();
-                capabilities.translatorAvailable = cap.available === 'readily';
+            // Check Translator (via window.ai for now)
+            if (window.ai?.translator) {
+                try {
+                    const avail = await window.ai.translator.availability();
+                    capabilities.translatorAvailable = avail === 'available' || avail === 'downloadable';
+                } catch (e) {
+                    console.warn('[BuiltInAI] Translator check failed:', e);
+                }
             }
 
-            if (ai.languageDetector) {
-                const cap = await ai.languageDetector.capabilities();
-                capabilities.languageDetectorAvailable = cap.available === 'readily';
+            // Check Language Detector
+            if (window.ai?.languageDetector) {
+                try {
+                    const avail = await window.ai.languageDetector.availability();
+                    capabilities.languageDetectorAvailable = avail === 'available' || avail === 'downloadable';
+                } catch (e) {
+                    console.warn('[BuiltInAI] LanguageDetector check failed:', e);
+                }
             }
 
             this.capabilities = capabilities;
+            console.log('[BuiltInAI] Capabilities:', capabilities);
             return { success: true, data: capabilities };
         } catch (error) {
             return {
@@ -171,21 +293,45 @@ export class BuiltInAI {
     /**
      * Create or get AI session for prompting
      */
-    async getSession(options?: PromptOptions): Promise<AIResult<AISession>> {
+    async getSession(options?: PromptOptions): Promise<AIResult<LanguageModelSession>> {
         if (this.session) {
             return { success: true, data: this.session };
         }
 
         try {
-            const ai = window.ai;
-            if (!ai?.languageModel) {
-                return { success: false, error: 'Prompt API not available' };
+            const languageModel = this.getLanguageModel();
+            if (!languageModel) {
+                return { success: false, error: 'LanguageModel API not available. Requires Chrome 138+.' };
             }
 
-            this.session = await ai.languageModel.create({
-                temperature: options?.temperature ?? 0.7,
-                topK: options?.topK ?? 40,
+            // Check availability first
+            const availability = await languageModel.availability();
+            if (availability === 'unavailable') {
+                return { success: false, error: 'LanguageModel is unavailable on this device.' };
+            }
+
+            // Get model params for optimal settings
+            let temperature = options?.temperature ?? 0.7;
+            let topK = options?.topK ?? 40;
+
+            try {
+                const params = await languageModel.params();
+                temperature = Math.min(temperature, params.maxTemperature);
+                topK = Math.min(topK, params.maxTopK);
+            } catch (e) {
+                console.warn('[BuiltInAI] Could not get model params, using defaults');
+            }
+
+            this.session = await languageModel.create({
+                temperature,
+                topK,
                 systemPrompt: options?.systemPrompt,
+                monitor: (m) => {
+                    m.addEventListener('downloadprogress', (e: Event) => {
+                        const progress = e as ProgressEvent;
+                        console.log(`[BuiltInAI] Model download: ${Math.round((progress.loaded / progress.total) * 100)}%`);
+                    });
+                },
             });
 
             return { success: true, data: this.session };
@@ -231,8 +377,13 @@ export class BuiltInAI {
         }
 
         try {
-            for await (const chunk of sessionResult.data.promptStreaming(input)) {
-                yield { success: true, data: chunk };
+            const stream = sessionResult.data.promptStreaming(input);
+            const reader = stream.getReader();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                yield { success: true, data: value };
             }
         } catch (error) {
             yield {
@@ -243,23 +394,28 @@ export class BuiltInAI {
     }
 
     /**
-     * Summarize text
+     * Summarize text using Summarizer API
      */
-    async summarize(text: string): Promise<AIResult<string>> {
+    async summarize(text: string, type: 'key-points' | 'tldr' | 'teaser' | 'headline' = 'key-points'): Promise<AIResult<string>> {
         try {
-            const ai = window.ai;
-            if (!ai?.summarizer) {
+            const summarizer = this.getSummarizer();
+            if (!summarizer) {
                 return { success: false, error: 'Summarizer API not available' };
             }
 
-            const summarizer = await ai.summarizer.create({
-                type: 'key-points',
+            const availability = await summarizer.availability();
+            if (availability === 'unavailable') {
+                return { success: false, error: 'Summarizer is unavailable on this device' };
+            }
+
+            const session = await summarizer.create({
+                type,
                 format: 'markdown',
                 length: 'medium',
             });
 
-            const summary = await summarizer.summarize(text);
-            summarizer.destroy();
+            const summary = await session.summarize(text);
+            session.destroy();
 
             return { success: true, data: summary };
         } catch (error) {
@@ -273,21 +429,26 @@ export class BuiltInAI {
     /**
      * Generate text with Writer API
      */
-    async write(prompt: string): Promise<AIResult<string>> {
+    async write(prompt: string, tone: 'formal' | 'neutral' | 'casual' = 'neutral'): Promise<AIResult<string>> {
         try {
-            const ai = window.ai;
-            if (!ai?.writer) {
-                return { success: false, error: 'Writer API not available' };
+            const writer = this.getWriter();
+            if (!writer) {
+                return { success: false, error: 'Writer API not available (requires origin trial)' };
             }
 
-            const writer = await ai.writer.create({
-                tone: 'neutral',
+            const availability = await writer.availability();
+            if (availability === 'unavailable') {
+                return { success: false, error: 'Writer is unavailable on this device' };
+            }
+
+            const session = await writer.create({
+                tone,
                 format: 'plain-text',
                 length: 'medium',
             });
 
-            const result = await writer.write(prompt);
-            writer.destroy();
+            const result = await session.write(prompt);
+            session.destroy();
 
             return { success: true, data: result };
         } catch (error) {
@@ -301,21 +462,26 @@ export class BuiltInAI {
     /**
      * Rewrite text
      */
-    async rewrite(text: string): Promise<AIResult<string>> {
+    async rewrite(text: string, tone: 'more-formal' | 'as-is' | 'more-casual' = 'as-is'): Promise<AIResult<string>> {
         try {
-            const ai = window.ai;
-            if (!ai?.rewriter) {
-                return { success: false, error: 'Rewriter API not available' };
+            const rewriter = this.getRewriter();
+            if (!rewriter) {
+                return { success: false, error: 'Rewriter API not available (requires origin trial)' };
             }
 
-            const rewriter = await ai.rewriter.create({
-                tone: 'as-is',
+            const availability = await rewriter.availability();
+            if (availability === 'unavailable') {
+                return { success: false, error: 'Rewriter is unavailable on this device' };
+            }
+
+            const session = await rewriter.create({
+                tone,
                 format: 'as-is',
                 length: 'as-is',
             });
 
-            const result = await rewriter.rewrite(text);
-            rewriter.destroy();
+            const result = await session.rewrite(text);
+            session.destroy();
 
             return { success: true, data: result };
         } catch (error) {
@@ -335,12 +501,11 @@ export class BuiltInAI {
         targetLanguage: string
     ): Promise<AIResult<string>> {
         try {
-            const ai = window.ai;
-            if (!ai?.translator) {
+            if (!window.ai?.translator) {
                 return { success: false, error: 'Translator API not available' };
             }
 
-            const translator = await ai.translator.create({
+            const translator = await window.ai.translator.create({
                 sourceLanguage,
                 targetLanguage,
             });
@@ -364,12 +529,11 @@ export class BuiltInAI {
         text: string
     ): Promise<AIResult<Array<{ language: string; confidence: number }>>> {
         try {
-            const ai = window.ai;
-            if (!ai?.languageDetector) {
+            if (!window.ai?.languageDetector) {
                 return { success: false, error: 'Language Detector API not available' };
             }
 
-            const detector = await ai.languageDetector.create();
+            const detector = await window.ai.languageDetector.create();
             const results = await detector.detect(text);
             detector.destroy();
 
@@ -403,3 +567,30 @@ export class BuiltInAI {
  * Singleton instance for easy access
  */
 export const builtInAI = new BuiltInAI();
+
+/**
+ * Helper to get a built-in AI session for hybrid mode
+ */
+export interface BuiltInAISession {
+    prompt(input: string): Promise<string>;
+    destroy(): void;
+}
+
+export async function getBuiltInAI(): Promise<BuiltInAISession | null> {
+    const result = await builtInAI.checkCapabilities();
+    if (!result.success || !result.data?.promptApiAvailable) {
+        console.log('[BuiltInAI] Prompt API not available');
+        return null;
+    }
+
+    return {
+        prompt: async (input: string) => {
+            const result = await builtInAI.prompt(input);
+            if (!result.success) {
+                throw new Error(result.error);
+            }
+            return result.data!;
+        },
+        destroy: () => builtInAI.destroy(),
+    };
+}

@@ -40,7 +40,7 @@ async function handleMessage(message: {
 }): Promise<unknown> {
     switch (message.type) {
         case 'START_RECORDING':
-            return startRecording(message.tabId as number);
+            return startRecording(message.streamId as string);
 
         case 'STOP_RECORDING':
             return stopRecording();
@@ -61,32 +61,38 @@ async function handleMessage(message: {
 
 /**
  * Start screen recording using tab capture
+ * Uses streamId from chrome.tabCapture.getMediaStreamId (called from service worker)
  */
-async function startRecording(tabId: number): Promise<{ success: boolean; error?: string }> {
+async function startRecording(streamId: string): Promise<{ success: boolean; error?: string }> {
     if (recordingState.isRecording) {
         return { success: false, error: 'Already recording' };
     }
 
     try {
-        // Request tab capture stream
-        const stream = await chrome.tabCapture.capture({
-            video: true,
-            audio: false,
-            videoConstraints: {
+        // Get MediaStream using the streamId from service worker
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
                 mandatory: {
                     chromeMediaSource: 'tab',
+                    chromeMediaSourceId: streamId,
+                },
+            },
+            video: {
+                mandatory: {
+                    chromeMediaSource: 'tab',
+                    chromeMediaSourceId: streamId,
                     maxWidth: 1920,
                     maxHeight: 1080,
                     maxFrameRate: 30,
                 },
             },
-        });
+        } as MediaStreamConstraints);
 
         if (!stream) {
             return { success: false, error: 'Failed to capture tab' };
         }
 
-        // Create media recorder
+        // Create media recorder with WebM format
         const mediaRecorder = new MediaRecorder(stream, {
             mimeType: 'video/webm;codecs=vp9',
             videoBitsPerSecond: 2500000,
@@ -106,8 +112,14 @@ async function startRecording(tabId: number): Promise<{ success: boolean; error?
         recordingState.isRecording = true;
         recordingState.mediaRecorder = mediaRecorder;
 
+        // Update URL hash to indicate recording state (for service worker to check)
+        window.location.hash = 'recording';
+
+        console.log('[Offscreen] Recording started');
+
         return { success: true };
     } catch (error) {
+        console.error('[Offscreen] Recording failed:', error);
         return {
             success: false,
             error: `Recording failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -120,7 +132,7 @@ async function startRecording(tabId: number): Promise<{ success: boolean; error?
  */
 async function stopRecording(): Promise<{
     success: boolean;
-    data?: { blob: Blob; duration: number };
+    data?: { blob: Blob; duration: number; base64?: string; url?: string };
     error?: string;
 }> {
     if (!recordingState.isRecording || !recordingState.mediaRecorder) {
@@ -128,7 +140,7 @@ async function stopRecording(): Promise<{
     }
 
     return new Promise((resolve) => {
-        recordingState.mediaRecorder!.onstop = () => {
+        recordingState.mediaRecorder!.onstop = async () => {
             const blob = new Blob(recordingState.chunks, { type: 'video/webm' });
             const duration = Date.now() - recordingState.startTime;
 
@@ -141,9 +153,29 @@ async function stopRecording(): Promise<{
             recordingState.mediaRecorder = null;
             recordingState.chunks = [];
 
+            // Clear URL hash
+            window.location.hash = '';
+
+            // Create object URL for download
+            const url = URL.createObjectURL(blob);
+
+            // Convert to base64 for transfer (optional - can be large)
+            let base64: string | undefined;
+            try {
+                const arrayBuffer = await blob.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+                let binary = '';
+                uint8Array.forEach(byte => binary += String.fromCharCode(byte));
+                base64 = btoa(binary);
+            } catch (e) {
+                console.warn('[Offscreen] Base64 encoding failed:', e);
+            }
+
+            console.log('[Offscreen] Recording stopped, duration:', duration, 'ms');
+
             resolve({
                 success: true,
-                data: { blob, duration },
+                data: { blob, duration, base64, url },
             });
         };
 

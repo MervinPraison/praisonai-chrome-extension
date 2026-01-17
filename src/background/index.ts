@@ -22,6 +22,206 @@ const agents = new Map<number, BrowserAgent>();
 let bridgeClient: BridgeClient | null = null;
 let bridgeConnected = false;
 
+// *** FIX: Session cleanup lock to prevent race conditions ***
+let sessionCleanupInProgress = false;
+
+// *** FIX: Use chrome.storage.session for persistent session state ***
+// This survives service worker restarts and prevents back-to-back session issues
+interface SessionState {
+    activeTabId: number | null;
+    sessionId: string | null;
+    isActive: boolean;
+    timestamp: number;
+}
+
+const DEFAULT_SESSION_STATE: SessionState = {
+    activeTabId: null,
+    sessionId: null,
+    isActive: false,
+    timestamp: 0,
+};
+
+async function getSessionState(): Promise<SessionState> {
+    try {
+        const result = await chrome.storage.session.get('sessionState');
+        return result.sessionState || DEFAULT_SESSION_STATE;
+    } catch (e) {
+        console.warn('[PraisonAI] Failed to get session state:', e);
+        return DEFAULT_SESSION_STATE;
+    }
+}
+
+async function setSessionState(state: Partial<SessionState>): Promise<void> {
+    try {
+        const current = await getSessionState();
+        await chrome.storage.session.set({
+            sessionState: { ...current, ...state, timestamp: Date.now() }
+        });
+    } catch (e) {
+        console.warn('[PraisonAI] Failed to set session state:', e);
+    }
+}
+
+// *** VIDEO RECORDING STATE ***
+let isRecording = false;
+let recordingSessionId: string | null = null;
+
+/**
+ * Ensure offscreen document exists for recording
+ */
+async function ensureOffscreenDocument(): Promise<void> {
+    const existingContexts = await chrome.runtime.getContexts({});
+    const offscreenDocument = existingContexts.find(
+        (c) => c.contextType === 'OFFSCREEN_DOCUMENT'
+    );
+
+    if (!offscreenDocument) {
+        await chrome.offscreen.createDocument({
+            url: 'offscreen.html',
+            reasons: [chrome.offscreen.Reason.USER_MEDIA],
+            justification: 'Recording browser automation session',
+        });
+    }
+}
+
+/**
+ * Start recording the current tab
+ */
+async function startSessionRecording(tabId: number): Promise<{ success: boolean; error?: string }> {
+    if (isRecording) {
+        return { success: false, error: 'Already recording' };
+    }
+
+    try {
+        // Ensure offscreen document exists
+        await ensureOffscreenDocument();
+
+        // Get media stream ID for the tab
+        const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+
+        if (!streamId) {
+            return { success: false, error: 'Failed to get stream ID' };
+        }
+
+        // Send to offscreen document to start recording
+        const response = await chrome.runtime.sendMessage({
+            type: 'START_RECORDING',
+            streamId: streamId,
+        });
+
+        if (response?.success) {
+            isRecording = true;
+            console.log('[PraisonAI] Session recording started');
+            return { success: true };
+        }
+
+        return { success: false, error: response?.error || 'Unknown error' };
+    } catch (error) {
+        console.error('[PraisonAI] Failed to start recording:', error);
+        return { success: false, error: String(error) };
+    }
+}
+
+/**
+ * Stop recording and save the video
+ */
+async function stopSessionRecording(): Promise<{ success: boolean; videoUrl?: string; duration?: number; error?: string }> {
+    if (!isRecording) {
+        return { success: false, error: 'Not recording' };
+    }
+
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: 'STOP_RECORDING',
+        });
+
+        isRecording = false;
+
+        if (response?.success && response.data) {
+            console.log('[PraisonAI] Session recording stopped, duration:', response.data.duration, 'ms');
+            return {
+                success: true,
+                videoUrl: response.data.url,
+                duration: response.data.duration,
+            };
+        }
+
+        return { success: false, error: response?.error || 'Unknown error' };
+    } catch (error) {
+        isRecording = false;
+        console.error('[PraisonAI] Failed to stop recording:', error);
+        return { success: false, error: String(error) };
+    }
+}
+
+// Compatibility layer - also track in memory for faster access within same SW lifecycle
+let lastSessionTabId: number | null = null;
+
+/**
+ * Ensure no active debugger is attached before starting new session.
+ * This prevents "Another debugger attached" errors.
+ * 
+ * *** FIX: Uses chrome.storage.session to persist state across service worker restarts ***
+ */
+async function ensureNoActiveDebugger(tabId?: number): Promise<void> {
+    // If cleanup is in progress, wait for it
+    while (sessionCleanupInProgress) {
+        console.log('[PraisonAI] Waiting for session cleanup to complete...');
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    // Set cleanup lock
+    sessionCleanupInProgress = true;
+
+    try {
+        // *** FIX: Check BOTH in-memory and storage-based state ***
+        // This catches cases where:
+        // 1. stopAgent() cleared memory but didn't wait for new session
+        // 2. Service worker restarted and lost memory state
+        const storedState = await getSessionState();
+        const previousTabId = lastSessionTabId || storedState.activeTabId;
+
+        if (previousTabId !== null) {
+            const oldClient = cdpSessions.get(previousTabId);
+            if (oldClient) {
+                console.log(`[PraisonAI] Cleaning up previous session on tab ${previousTabId}`);
+                try {
+                    await oldClient.disconnect();
+                } catch (e) {
+                    console.warn('[PraisonAI] Previous session disconnect warning:', e);
+                }
+                cdpSessions.delete(previousTabId);
+                // Wait for Chrome to release debugger
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            // Clear memory state but keep storage state for tracking
+            lastSessionTabId = null;
+        }
+
+        // Also check the target tab if specified and different from previousTab
+        if (tabId && tabId !== previousTabId) {
+            const existingClient = cdpSessions.get(tabId);
+            if (existingClient) {
+                console.log(`[PraisonAI] Disconnecting existing CDP on target tab ${tabId}`);
+                try {
+                    await existingClient.disconnect();
+                } catch (e) {
+                    console.warn('[PraisonAI] Existing CDP disconnect warning:', e);
+                }
+                cdpSessions.delete(tabId);
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+
+        // Mark session as inactive in storage (but DON'T clear activeTabId yet)
+        // This allows next session to know cleanup was attempted
+        await setSessionState({ isActive: false });
+
+    } finally {
+        sessionCleanupInProgress = false;
+    }
+}
+
 // Console logs captured from pages
 const consoleLogs = new Map<number, Array<{ level: string; text: string; timestamp: number }>>();
 
@@ -81,8 +281,20 @@ async function initBridgeConnection(): Promise<boolean> {
     };
 
     // Handler for server-triggered automation (from CLI)
-    bridgeClient.onStartAutomation = async (goal, sessionId) => {
+    bridgeClient.onStartAutomation = async (goal, sessionId, hadPreviousSession) => {
         console.log(`[PraisonAI] Starting automation from server: ${goal}`);
+        console.log(`[PraisonAI] hadPreviousSession=${hadPreviousSession}, lastSessionTabId=${lastSessionTabId}`);
+
+        // *** FIX: Always cleanup CDP between sessions ***
+        // After normal completion: stopped=true (so hadPreviousSession=false) AND lastSessionTabId=null
+        // So we must ALWAYS run cleanup and ensure state is correct for new session
+        console.log(`[PraisonAI] Session cleanup - hadPreviousSession=${hadPreviousSession}, lastSessionTabId=${lastSessionTabId}`);
+
+        // Ensure no stale CDP is attached (ALWAYS run this)
+        await ensureNoActiveDebugger(lastSessionTabId || undefined);
+
+        // Always wait for any previous session to fully complete
+        await new Promise(resolve => setTimeout(resolve, 500));
 
         // Get current active tab or find a suitable one
         let tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -119,6 +331,9 @@ async function initBridgeConnection(): Promise<boolean> {
             return;
         }
 
+        // *** FIX: Ensure no previous debugger is attached ***
+        await ensureNoActiveDebugger(tab.id);
+
         // Create CDP client for this tab
         const cdpResult = await createCDPClient(tab.id);
         if (!cdpResult.success || !cdpResult.data) {
@@ -127,6 +342,14 @@ async function initBridgeConnection(): Promise<boolean> {
         }
         const cdpClient = cdpResult.data;
         cdpSessions.set(tab.id, cdpClient);
+        lastSessionTabId = tab.id;  // Track for cleanup
+
+        // *** FIX: Persist session state in chrome.storage.session ***
+        await setSessionState({
+            activeTabId: tab.id,
+            sessionId: sessionId,
+            isActive: true,
+        });
 
         // Setup the bridge client with CDP
         bridgeClient.setCDPClient(cdpClient);
@@ -143,7 +366,15 @@ async function initBridgeConnection(): Promise<boolean> {
 
             // Check for completion
             if (action.done || action.action === 'done') {
-                console.log('[PraisonAI] CLI task completed');
+                console.log('[PraisonAI] CLI task completed - stopping session');
+                // Clean up CDP before ending session
+                const client = cdpSessions.get(tabId);
+                if (client) {
+                    client.disconnect().catch(() => { });
+                    cdpSessions.delete(tabId);
+                }
+                // Properly end the session
+                await bridgeClient?.stopSession();
                 return;
             }
 
@@ -189,23 +420,27 @@ async function initBridgeConnection(): Promise<boolean> {
 // Try to connect to bridge server on startup
 initBridgeConnection().catch(console.error);
 
-// Setup periodic reconnection check using chrome.alarms
-chrome.alarms.create('bridgeReconnect', { periodInMinutes: 0.5 }); // Every 30 seconds
+// Setup periodic reconnection check using chrome.alarms (guard for API availability)
+if (chrome.alarms?.create) {
+    chrome.alarms.create('bridgeReconnect', { periodInMinutes: 0.5 }); // Every 30 seconds
+}
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === 'bridgeReconnect') {
-        // If not connected, try to reconnect
-        if (!bridgeConnected && bridgeClient) {
-            console.log('[PraisonAI] Attempting periodic reconnection...');
-            bridgeClient.connect().catch(console.error);
+if (chrome.alarms?.onAlarm) {
+    chrome.alarms.onAlarm.addListener((alarm) => {
+        if (alarm.name === 'bridgeReconnect') {
+            // If not connected, try to reconnect
+            if (!bridgeConnected && bridgeClient) {
+                console.log('[PraisonAI] Attempting periodic reconnection...');
+                bridgeClient.connect().catch(console.error);
+            }
         }
-    }
-});
+    });
+}
 
 /**
  * Side Panel lifecycle events (Chrome 141+)
  */
-if (chrome.sidePanel.onOpened) {
+if (chrome.sidePanel?.onOpened) {
     chrome.sidePanel.onOpened.addListener((info) => {
         const key = info.tabId ?? info.windowId;
         panelState.set(key, true);
@@ -213,7 +448,7 @@ if (chrome.sidePanel.onOpened) {
     });
 }
 
-if (chrome.sidePanel.onClosed) {
+if (chrome.sidePanel?.onClosed) {
     chrome.sidePanel.onClosed.addListener((info) => {
         const key = info.tabId ?? info.windowId;
         panelState.set(key, false);
@@ -225,6 +460,9 @@ if (chrome.sidePanel.onClosed) {
             agents.get(info.tabId)?.stop();
             agents.delete(info.tabId);
         }
+
+        // *** FIX: Mark session as inactive in storage ***
+        setSessionState({ isActive: false }).catch(console.warn);
     });
 }
 
@@ -241,7 +479,7 @@ chrome.commands.onCommand.addListener(async (command) => {
     switch (command) {
         case 'start-agent':
             // Open panel and start agent with default goal
-            await chrome.sidePanel.open({ tabId: tab.id });
+            chrome.sidePanel?.open?.({ tabId: tab.id });
             chrome.runtime.sendMessage({
                 type: 'START_AUTOMATION',
                 tabId: tab.id,
@@ -251,7 +489,7 @@ chrome.commands.onCommand.addListener(async (command) => {
         case 'capture-screenshot':
             // Capture screenshot and notify
             const result = await captureScreenshot(tab.id);
-            if (result.success) {
+            if (result.success && chrome.notifications?.create) {
                 chrome.notifications.create({
                     type: 'basic',
                     iconUrl: 'icons/icon128.png',
@@ -269,76 +507,82 @@ chrome.commands.onCommand.addListener(async (command) => {
 chrome.runtime.onInstalled.addListener(async () => {
     console.log('PraisonAI Browser Agent installed');
 
-    // Register context menu items
-    chrome.contextMenus.create({
-        id: 'praison-automate',
-        title: 'Automate with PraisonAI',
-        contexts: ['page', 'selection'],
-    });
+    // Register context menu items (guard for Chrome versions without contextMenus API)
+    if (chrome.contextMenus?.create) {
+        chrome.contextMenus.create({
+            id: 'praison-automate',
+            title: 'Automate with PraisonAI',
+            contexts: ['page', 'selection'],
+        });
 
-    chrome.contextMenus.create({
-        id: 'praison-screenshot',
-        title: 'Capture Screenshot',
-        contexts: ['page'],
-    });
+        chrome.contextMenus.create({
+            id: 'praison-screenshot',
+            title: 'Capture Screenshot',
+            contexts: ['page'],
+        });
 
-    chrome.contextMenus.create({
-        id: 'praison-summarize',
-        title: 'Summarize Selection',
-        contexts: ['selection'],
-    });
+        chrome.contextMenus.create({
+            id: 'praison-summarize',
+            title: 'Summarize Selection',
+            contexts: ['selection'],
+        });
 
-    chrome.contextMenus.create({
-        id: 'praison-extract',
-        title: 'Extract Data',
-        contexts: ['page'],
-    });
+        chrome.contextMenus.create({
+            id: 'praison-extract',
+            title: 'Extract Data',
+            contexts: ['page'],
+        });
+    }
 
-    // Set side panel behavior
-    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+    // Set side panel behavior (guard for Chrome versions without sidePanel API)
+    if (chrome.sidePanel?.setPanelBehavior) {
+        await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+    }
 });
 
 /**
  * Handle context menu clicks
  */
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-    if (!tab?.id) return;
+if (chrome.contextMenus?.onClicked) {
+    chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+        if (!tab?.id) return;
 
-    switch (info.menuItemId) {
-        case 'praison-automate':
-            // Open side panel for automation
-            await chrome.sidePanel.open({ tabId: tab.id });
-            // Send automation request
-            chrome.runtime.sendMessage({
-                type: 'START_AUTOMATION',
-                tabId: tab.id,
-                selection: info.selectionText,
-            });
-            break;
-
-        case 'praison-screenshot':
-            await captureScreenshot(tab.id);
-            break;
-
-        case 'praison-summarize':
-            if (info.selectionText) {
-                await chrome.sidePanel.open({ tabId: tab.id });
+        switch (info.menuItemId) {
+            case 'praison-automate':
+                // Open side panel for automation
+                chrome.sidePanel?.open?.({ tabId: tab.id });
+                // Send automation request
                 chrome.runtime.sendMessage({
-                    type: 'SUMMARIZE',
-                    text: info.selectionText,
+                    type: 'START_AUTOMATION',
+                    tabId: tab.id,
+                    selection: info.selectionText,
                 });
-            }
-            break;
+                break;
 
-        case 'praison-extract':
-            await chrome.sidePanel.open({ tabId: tab.id });
-            chrome.runtime.sendMessage({
-                type: 'EXTRACT_DATA',
-                tabId: tab.id,
-            });
-            break;
-    }
-});
+            case 'praison-screenshot':
+                await captureScreenshot(tab.id);
+                break;
+
+            case 'praison-summarize':
+                if (info.selectionText) {
+                    chrome.sidePanel?.open?.({ tabId: tab.id });
+                    chrome.runtime.sendMessage({
+                        type: 'SUMMARIZE',
+                        text: info.selectionText,
+                    });
+                }
+                break;
+
+            case 'praison-extract':
+                chrome.sidePanel?.open?.({ tabId: tab.id });
+                chrome.runtime.sendMessage({
+                    type: 'EXTRACT_DATA',
+                    tabId: tab.id,
+                });
+                break;
+        }
+    });
+}
 
 /**
  * Handle messages from content scripts and side panel
@@ -754,20 +998,51 @@ async function sendObservationToBridge(tabId: number, goal: string, client: CDPC
 /**
  * Stop browser agent
  */
-function stopAgent(tabId: number) {
+async function stopAgent(tabId: number) {
     console.log('[PraisonAI] Stopping agent for tab', tabId);
 
-    // Stop local agent if exists
-    const agent = agents.get(tabId);
-    if (agent) {
-        agent.stop();
-        agents.delete(tabId);
-    }
+    // *** FIX: Use cleanup lock to prevent race conditions ***
+    sessionCleanupInProgress = true;
 
-    // Stop bridge session if connected
-    if (bridgeClient && bridgeConnected) {
-        bridgeClient.stopSession();
-        bridgeClient.onAction = null;  // Clear action handler to stop loop
+    try {
+        // Stop local agent if exists
+        const agent = agents.get(tabId);
+        if (agent) {
+            agent.stop();
+            agents.delete(tabId);
+        }
+
+        // Stop bridge session if connected
+        if (bridgeClient && bridgeConnected) {
+            bridgeClient.stopSession();
+            bridgeClient.onAction = null;  // Clear action handler to stop loop
+        }
+
+        // *** FIX: Clean up CDP session to prevent "Another debugger attached" error ***
+        const cdpClient = cdpSessions.get(tabId);
+        if (cdpClient) {
+            console.log('[PraisonAI] Disconnecting CDP client for tab', tabId);
+            try {
+                await cdpClient.disconnect();
+            } catch (err) {
+                console.warn('[PraisonAI] CDP disconnect warning:', err);
+            }
+            cdpSessions.delete(tabId);
+        }
+
+        // *** CRITICAL FIX: Do NOT clear lastSessionTabId here! ***
+        // Instead, mark session as inactive in storage
+        // This allows ensureNoActiveDebugger() to still detect and handle cleanup
+        // when the next session starts, even if this session's cleanup completed
+        await setSessionState({ isActive: false });
+        // NOTE: We intentionally do NOT clear lastSessionTabId here anymore
+        // It will be cleared by ensureNoActiveDebugger() when new session starts
+
+        // Small delay to ensure Chrome releases debugger
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+    } finally {
+        sessionCleanupInProgress = false;
     }
 
     return { success: true };

@@ -190,8 +190,67 @@ export class CDPClient {
      * Method 1: getBoundingClientRect + mouse events (most reliable)
      * Method 2: JavaScript element.click() (fallback)
      * Method 3: Focus + Enter key (for buttons/links)
+     * Method 4: Text-based matching (for invalid selectors)
      */
     async clickElement(selector: string, method: 'auto' | 'js' | 'focus' = 'auto'): Promise<CDPResult<void>> {
+        // *** FIX: Validate and sanitize selector ***
+        // Check for invalid jQuery-style selectors
+        const isInvalidSelector = (sel: string): boolean => {
+            return sel.includes(':contains(') ||
+                sel.includes(':has(') ||
+                sel.includes(':not(') && sel.includes(':contains') ||
+                sel.startsWith('$') ||
+                sel.includes('$(');
+        };
+
+        // Extract text from :contains() for fallback text search
+        const extractContainsText = (sel: string): string | null => {
+            const match = sel.match(/:contains\(['"]?([^'"]+)['"]?\)/);
+            return match ? match[1] : null;
+        };
+
+        // *** FIX: Handle invalid selectors with text fallback ***
+        if (isInvalidSelector(selector)) {
+            const searchText = extractContainsText(selector);
+            console.log(`[CDP] Invalid selector detected: ${selector}, trying text search: "${searchText}"`);
+
+            if (searchText) {
+                // Find element by visible text
+                const textResult = await this.evaluate(`
+                    (function() {
+                        const searchText = "${searchText.replace(/"/g, '\\"')}";
+                        // Search links first
+                        const links = Array.from(document.querySelectorAll('a'));
+                        for (const link of links) {
+                            if (link.textContent && link.textContent.toLowerCase().includes(searchText.toLowerCase())) {
+                                link.scrollIntoView({ block: 'center', behavior: 'instant' });
+                                const rect = link.getBoundingClientRect();
+                                return { found: true, x: rect.left + rect.width/2, y: rect.top + rect.height/2 };
+                            }
+                        }
+                        // Search buttons
+                        const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'));
+                        for (const btn of buttons) {
+                            if (btn.textContent && btn.textContent.toLowerCase().includes(searchText.toLowerCase())) {
+                                btn.scrollIntoView({ block: 'center', behavior: 'instant' });
+                                const rect = btn.getBoundingClientRect();
+                                return { found: true, x: rect.left + rect.width/2, y: rect.top + rect.height/2 };
+                            }
+                        }
+                        return { found: false };
+                    })()
+                `);
+
+                if (textResult.success && (textResult.data as { found: boolean })?.found) {
+                    const coords = textResult.data as { x: number; y: number };
+                    await new Promise(r => setTimeout(r, 100));
+                    return this.click(coords.x, coords.y);
+                }
+            }
+
+            return { success: false, error: `Invalid selector (jQuery-style not supported): ${selector}` };
+        }
+
         const escapedSelector = selector.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
 
         // Method 1: Scroll into view and click at viewport coordinates

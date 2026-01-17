@@ -70,7 +70,7 @@ export class BridgeClient {
     public onError: ((error: string) => void) | null = null;
     public onThought: ((thought: string) => void) | null = null;
     public onComplete: ((summary: string) => void) | null = null;  // Task completion callback
-    public onStartAutomation: ((goal: string, sessionId: string) => void) | null = null;  // Server-triggered start
+    public onStartAutomation: ((goal: string, sessionId: string, hadPreviousSession?: boolean) => void) | null = null;  // Server-triggered start
 
     constructor(config: Partial<BridgeConfig> = {}) {
         this.config = {
@@ -140,6 +140,34 @@ export class BridgeClient {
         this.currentGoal = null;
         this.stepNumber = 0;
         this.onStateChange?.('disconnected');
+    }
+
+    /**
+     * Check if a session is currently active (not stopped)
+     */
+    isSessionActive(): boolean {
+        return this.sessionId !== null && !this.stopped;
+    }
+
+    /**
+     * Get current step number
+     */
+    get currentStep(): number {
+        return this.stepNumber;
+    }
+
+    /**
+     * Reset state for a new session after cleanup
+     * This must be called after stopSession if a new session is starting
+     * @param sessionId The ID of the new session to restore (since stopSession clears it)
+     * @param goal The goal of the new session to restore
+     */
+    resetForNewSession(sessionId: string, goal: string): void {
+        this.sessionId = sessionId;
+        this.currentGoal = goal;
+        this.stopped = false;
+        this.stepNumber = 0;
+        console.log(`[Bridge] Reset for new session ${sessionId.substring(0, 8)} - sessionId and stopped restored`);
     }
 
     /**
@@ -520,12 +548,7 @@ export class BridgeClient {
         return this.sessionId;
     }
 
-    /**
-     * Get current step number
-     */
-    get currentStep(): number {
-        return this.stepNumber;
-    }
+
 
     // Private methods
 
@@ -581,11 +604,22 @@ export class BridgeClient {
                     // Server triggering automation (from CLI)
                     const startMsg = message as { type: string; goal: string; session_id: string };
                     console.log('[Bridge] Start automation from server:', startMsg.goal);
+
+                    // *** FIX: Save previous session info before overwriting ***
+                    const hadPreviousSession = this.sessionId !== null && !this.stopped;
+                    const previousSessionId = this.sessionId;
+                    if (hadPreviousSession) {
+                        console.log(`[Bridge] Previous session ${previousSessionId?.substring(0, 8)} still active - will be cleaned up`);
+                    }
+
+                    // Set new session state
                     this.sessionId = startMsg.session_id;
                     this.currentGoal = startMsg.goal;
                     this.stepNumber = 0;
                     this.stopped = false;
-                    this.onStartAutomation?.(startMsg.goal, startMsg.session_id);
+
+                    // Trigger handler with info about whether previous session existed
+                    this.onStartAutomation?.(startMsg.goal, startMsg.session_id, hadPreviousSession);
                     break;
 
                 case 'reload_extension':
