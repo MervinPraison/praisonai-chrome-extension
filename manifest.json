@@ -5,7 +5,7 @@
     "description": "AI-powered browser automation with on-device AI. Navigate, click, type, screenshot, and control your browser with natural language.",
     "author": "MervinPraison",
     "homepage_url": "https://docs.praison.ai",
-    "minimum_chrome_version": "114",
+    "minimum_chrome_version": "116",
     "permissions": [
         "sidePanel",
         "activeTab",
@@ -16,7 +16,8 @@
         "contextMenus",
         "notifications",
         "offscreen",
-        "tabCapture"
+        "tabCapture",
+        "alarms"
     ],
     "commands": {
         "_execute_action": {

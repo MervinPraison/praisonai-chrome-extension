@@ -77,7 +77,9 @@ export class BridgeClient {
             serverUrl: config.serverUrl || 'ws://localhost:8765/ws',
             reconnectDelay: config.reconnectDelay || 1000,
             maxReconnectAttempts: config.maxReconnectAttempts || 5,
-            heartbeatInterval: config.heartbeatInterval || 30000,
+            // Chrome 116+ keeps service workers alive while WebSocket is active
+            // Sending messages every 20s resets the idle timer (30s timeout)
+            heartbeatInterval: config.heartbeatInterval || 20000,
         };
     }
 
@@ -85,18 +87,24 @@ export class BridgeClient {
      * Connect to the bridge server
      */
     async connect(): Promise<boolean> {
+        console.log('[Bridge] connect() called, current state:', this.ws?.readyState);
+
         if (this.ws?.readyState === WebSocket.OPEN) {
+            console.log('[Bridge] Already connected');
             return true;
         }
 
         this.onStateChange?.('connecting');
+        console.log('[Bridge] Attempting to connect to:', this.config.serverUrl);
 
         return new Promise((resolve) => {
             try {
+                console.log('[Bridge] Creating WebSocket...');
                 this.ws = new WebSocket(this.config.serverUrl);
+                console.log('[Bridge] WebSocket created, waiting for events...');
 
                 this.ws.onopen = () => {
-                    console.log('[Bridge] Connected to server');
+                    console.log('[Bridge] ✓ Connected to server');
                     this.reconnectAttempts = 0;
                     this.onStateChange?.('connected');
                     this.startHeartbeat();
@@ -105,22 +113,23 @@ export class BridgeClient {
                 };
 
                 this.ws.onmessage = (event) => {
+                    console.log('[Bridge] Message received:', event.data.substring(0, 100));
                     this.handleMessage(event.data);
                 };
 
                 this.ws.onerror = (error) => {
-                    console.error('[Bridge] WebSocket error:', error);
+                    console.error('[Bridge] ✗ WebSocket error:', error);
                     this.onError?.('Connection error');
                 };
 
-                this.ws.onclose = () => {
-                    console.log('[Bridge] Connection closed');
+                this.ws.onclose = (event) => {
+                    console.log('[Bridge] Connection closed, code:', event.code, 'reason:', event.reason);
                     this.stopHeartbeat();
                     this.onStateChange?.('disconnected');
                     this.attemptReconnect();
                 };
             } catch (error) {
-                console.error('[Bridge] Failed to connect:', error);
+                console.error('[Bridge] ✗ Failed to connect:', error);
                 this.onStateChange?.('error');
                 resolve(false);
             }
@@ -554,24 +563,43 @@ export class BridgeClient {
 
     private send(message: BridgeMessage): Promise<boolean> {
         return new Promise((resolve) => {
-            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-                this.messageQueue.push(message);
-                resolve(false);
+            // If we have a direct WebSocket connection, use it
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                try {
+                    this.ws.send(JSON.stringify(message));
+                    resolve(true);
+                } catch (error) {
+                    console.error('[Bridge] Send error:', error);
+                    this.messageQueue.push(message);
+                    resolve(false);
+                }
                 return;
             }
 
-            try {
-                this.ws.send(JSON.stringify(message));
+            // *** FIX: If no direct WebSocket, forward through offscreen document ***
+            // This is the case when offscreen is primary (Layer 1)
+            console.log('[Bridge] No direct WebSocket, forwarding via offscreen');
+            chrome.runtime.sendMessage({
+                type: 'OFFSCREEN_SEND_BRIDGE',
+                target: 'offscreen',
+                data: JSON.stringify(message),
+            }).then(() => {
+                console.log('[Bridge] Message forwarded to offscreen');
                 resolve(true);
-            } catch (error) {
-                console.error('[Bridge] Send error:', error);
+            }).catch((error) => {
+                console.error('[Bridge] Failed to forward to offscreen:', error);
                 this.messageQueue.push(message);
                 resolve(false);
-            }
+            });
         });
     }
 
-    private handleMessage(data: string): void {
+
+    /**
+     * Handle incoming bridge message
+     * Public so background can forward messages from offscreen
+     */
+    public handleMessage(data: string): void {
         try {
             const message = JSON.parse(data) as BridgeMessage;
 

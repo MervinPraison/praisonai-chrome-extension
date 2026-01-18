@@ -5,7 +5,142 @@
  * - Canvas operations for image processing
  * - MediaRecorder for video recording
  * - Base64 encoding/decoding
+ * - PERSISTENT WebSocket connection to bridge server (MV3 workaround)
  */
+
+// ============================================================
+// PERSISTENT WEBSOCKET CONNECTION
+// This is the key to reliable bridge connection in MV3
+// The offscreen document lives longer than the service worker
+// ============================================================
+
+interface BridgeState {
+    ws: WebSocket | null;
+    connected: boolean;
+    reconnectAttempts: number;
+    maxReconnects: number;
+    reconnectDelay: number;
+    heartbeatInterval: ReturnType<typeof setInterval> | null;
+}
+
+const bridgeState: BridgeState = {
+    ws: null,
+    connected: false,
+    reconnectAttempts: 0,
+    maxReconnects: 10,
+    reconnectDelay: 2000,
+    heartbeatInterval: null,
+};
+
+const BRIDGE_URL = 'ws://localhost:8765/ws';
+const HEARTBEAT_INTERVAL = 20000; // 20 seconds
+
+/**
+ * Connect to bridge server via WebSocket
+ */
+function connectToBridge(): void {
+    if (bridgeState.ws?.readyState === WebSocket.OPEN) {
+        console.log('[Offscreen] Already connected to bridge');
+        return;
+    }
+
+    console.log('[Offscreen] Connecting to bridge:', BRIDGE_URL);
+
+    try {
+        bridgeState.ws = new WebSocket(BRIDGE_URL);
+
+        bridgeState.ws.onopen = () => {
+            console.log('[Offscreen] ✓ Connected to bridge server');
+            bridgeState.connected = true;
+            bridgeState.reconnectAttempts = 0;
+
+            // Notify service worker of connection
+            chrome.runtime.sendMessage({
+                type: 'OFFSCREEN_BRIDGE_CONNECTED',
+                connected: true
+            }).catch(() => { });
+
+            // Start heartbeat to keep WebSocket alive
+            startHeartbeat();
+        };
+
+        bridgeState.ws.onmessage = (event) => {
+            console.log('[Offscreen] Message from bridge:', event.data.substring(0, 100));
+
+            // Forward message to service worker
+            chrome.runtime.sendMessage({
+                type: 'OFFSCREEN_BRIDGE_MESSAGE',
+                data: event.data
+            }).catch(() => { });
+        };
+
+        bridgeState.ws.onerror = (error) => {
+            console.error('[Offscreen] Bridge connection error:', error);
+            bridgeState.connected = false;
+        };
+
+        bridgeState.ws.onclose = (event) => {
+            console.log('[Offscreen] Bridge connection closed:', event.code, event.reason);
+            bridgeState.connected = false;
+            stopHeartbeat();
+
+            // Notify service worker
+            chrome.runtime.sendMessage({
+                type: 'OFFSCREEN_BRIDGE_CONNECTED',
+                connected: false
+            }).catch(() => { });
+
+            // Attempt reconnection
+            if (bridgeState.reconnectAttempts < bridgeState.maxReconnects) {
+                bridgeState.reconnectAttempts++;
+                const delay = bridgeState.reconnectDelay * Math.pow(1.5, bridgeState.reconnectAttempts - 1);
+                console.log(`[Offscreen] Reconnecting in ${delay}ms (attempt ${bridgeState.reconnectAttempts})`);
+                setTimeout(connectToBridge, delay);
+            }
+        };
+    } catch (error) {
+        console.error('[Offscreen] Failed to create WebSocket:', error);
+        bridgeState.connected = false;
+    }
+}
+
+/**
+ * Send message to bridge server
+ */
+function sendToBridge(message: string): boolean {
+    if (bridgeState.ws?.readyState === WebSocket.OPEN) {
+        bridgeState.ws.send(message);
+        return true;
+    }
+    console.warn('[Offscreen] Cannot send - not connected to bridge');
+    return false;
+}
+
+/**
+ * Start heartbeat to keep connection alive
+ */
+function startHeartbeat(): void {
+    stopHeartbeat();
+    bridgeState.heartbeatInterval = setInterval(() => {
+        if (bridgeState.ws?.readyState === WebSocket.OPEN) {
+            bridgeState.ws.send(JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }));
+        }
+    }, HEARTBEAT_INTERVAL);
+}
+
+/**
+ * Stop heartbeat
+ */
+function stopHeartbeat(): void {
+    if (bridgeState.heartbeatInterval) {
+        clearInterval(bridgeState.heartbeatInterval);
+        bridgeState.heartbeatInterval = null;
+    }
+}
+
+// ============================================================
+// RECORDING STATE
+// ============================================================
 
 interface RecordingState {
     isRecording: boolean;
@@ -23,8 +158,18 @@ const recordingState: RecordingState = {
 
 /**
  * Handle messages from service worker
+ * 
+ * CRITICAL: Per official Chrome pattern (see geolocation-offscreen sample),
+ * we MUST check if the message is targeted at us before processing.
+ * This prevents race conditions where multiple contexts respond to the same message.
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // CRITICAL: Only handle messages targeted at offscreen
+    // Return false to NOT send a response and let other contexts handle it
+    if (message.target !== 'offscreen') {
+        return false;
+    }
+
     handleMessage(message)
         .then(sendResponse)
         .catch((error) => sendResponse({ success: false, error: error.message }));
@@ -39,6 +184,34 @@ async function handleMessage(message: {
     [key: string]: unknown;
 }): Promise<unknown> {
     switch (message.type) {
+        // ============================================================
+        // BRIDGE CONNECTION MESSAGES
+        // ============================================================
+        case 'OFFSCREEN_CONNECT_BRIDGE':
+            connectToBridge();
+            return { success: true };
+
+        case 'OFFSCREEN_DISCONNECT_BRIDGE':
+            if (bridgeState.ws) {
+                bridgeState.ws.close();
+                bridgeState.ws = null;
+            }
+            return { success: true };
+
+        case 'OFFSCREEN_SEND_BRIDGE':
+            const sent = sendToBridge(message.data as string);
+            return { success: sent };
+
+        case 'OFFSCREEN_BRIDGE_STATUS':
+            return {
+                success: true,
+                connected: bridgeState.connected,
+                readyState: bridgeState.ws?.readyState ?? -1
+            };
+
+        // ============================================================
+        // RECORDING MESSAGES
+        // ============================================================
         case 'START_RECORDING':
             return startRecording(message.streamId as string);
 
@@ -340,3 +513,20 @@ async function encodeVideo(
 }
 
 console.log('[PraisonAI] Offscreen document loaded');
+
+// CRITICAL: Send READY signal IMMEDIATELY to notify service worker
+// This replaces hardcoded delays with event-driven timing
+chrome.runtime.sendMessage({
+    type: 'OFFSCREEN_READY',
+    target: 'background'  // Target background so it knows we're ready
+}).catch(() => {
+    // Ignore errors - service worker may not be ready to receive yet
+    console.log('[PraisonAI] Could not notify background of READY (ok if first load)');
+});
+
+// AUTO-CONNECT: When offscreen document is created, immediately connect to bridge
+// This is the key to reliable connection - offscreen document persists
+setTimeout(() => {
+    console.log('[PraisonAI] Offscreen auto-connecting to bridge...');
+    connectToBridge();
+}, 100); // Short delay just to let things settle

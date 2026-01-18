@@ -9,8 +9,8 @@ src/
 ├── bridge/            # Bridge client
 │   └── client.ts      # WebSocket client to Python server
 ├── ai/                # AI integration
-│   ├── builtin.ts     # Gemini Nano APIs
-│   └── agent.ts       # Browser agent
+│   ├── builtin.ts     # Gemini Nano APIs (DISABLED for Agent mode)
+│   └── agent.ts       # Browser agent (uses Bridge → Python server)
 ├── content/           # Content script
 │   └── index.ts       # DOM interaction
 ├── sidepanel/         # Side Panel UI
@@ -18,8 +18,11 @@ src/
 │   ├── styles.css
 │   └── index.ts
 └── offscreen/         # Offscreen document
-    └── index.ts       # Video recording, canvas ops
+    └── index.ts       # WebSocket bridge, video recording
 ```
+
+> **Note:** Gemini Nano fallback is **disabled** for Agent mode because it's text-only and cannot process screenshots. The extension requires the PraisonAI bridge server for automation.
+
 
 ## Component Flow
 

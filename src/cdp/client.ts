@@ -319,21 +319,19 @@ export class CDPClient {
     }
 
     /**
-     * Type text
+     * Type text character by character
+     * 
+     * IMPORTANT: Use Input.insertText for reliable text input.
+     * Previous approach sent 'text' in both keyDown and keyUp which caused double-typing.
      */
     async type(text: string): Promise<CDPResult<void>> {
-        for (const char of text) {
-            await this.send('Input.dispatchKeyEvent', {
-                type: 'keyDown',
-                text: char,
-            });
-            await this.send('Input.dispatchKeyEvent', {
-                type: 'keyUp',
-                text: char,
-            });
-            // Small delay between keystrokes
-            await new Promise((resolve) => setTimeout(resolve, 50));
-        }
+        // *** DEBUG: Log exactly what text is being typed ***
+        console.log(`[CDP] type() called with text: "${text}" (${text.length} chars)`);
+
+        // Use Input.insertText for reliable text insertion
+        // This is the recommended approach for typing text
+        await this.send('Input.insertText', { text });
+        console.log(`[CDP] type() completed for: "${text}"`);
         return { success: true };
     }
 
@@ -341,8 +339,12 @@ export class CDPClient {
      * Type into element (clears existing content first)
      */
     async typeInElement(selector: string, text: string): Promise<CDPResult<void>> {
+        // *** DEBUG: Log element and text ***
+        console.log(`[CDP] typeInElement() called - selector: "${selector}", text: "${text}"`);
+
         const clickResult = await this.clickElement(selector);
         if (!clickResult.success) {
+            console.log(`[CDP] typeInElement() - click failed for: ${selector}`);
             return clickResult;
         }
 

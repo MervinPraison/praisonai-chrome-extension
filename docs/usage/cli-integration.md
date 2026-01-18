@@ -1,20 +1,30 @@
 # CLI Integration
 
-Run automation directly from terminal when extension is connected to the bridge server.
+Run automation directly from terminal using the PraisonAI bridge server.
 
-## Start Bridge Server
+> **Recommended:** Use `praisonai browser launch` which handles everything automatically.
+
+## Quick Start (Recommended)
+
+```bash
+# Set your API key
+export OPENAI_API_KEY="your-key"
+
+# Launch automation (starts server + Chrome automatically)
+praisonai browser launch "Go to google and search praisonai"
+praisonai browser launch "Find flights to Paris" --model gpt-4o
+```
+
+## Manual Setup
+
+### Start Bridge Server
 
 ```bash
 praisonai browser start
 ```
 
-## Run a Goal
+### Run a Goal
 
-```bash
-praisonai browser run "Go to google and search praisonai"
-praisonai browser run "Find flights to Paris" --model gpt-4o
-praisonai browser run "task" --debug  # Show all WebSocket messages
-```
 
 ### Example Output
 
@@ -65,3 +75,25 @@ praisonai browser screenshot --fullpage -o full.png
 praisonai browser navigate "https://github.com"
 praisonai browser navigate "https://docs.praison.ai" --tab TAB_ID
 ```
+
+## Troubleshooting
+
+### Agent returns "wait" action repeatedly
+
+This usually means:
+1. **Missing API key** - Set `OPENAI_API_KEY` or `GEMINI_API_KEY`
+2. **Wrong model** - Use a vision-capable model (gpt-4o, gemini-2.0-flash)
+
+Run diagnostics:
+```bash
+praisonai browser doctor api-keys
+praisonai browser doctor flow
+```
+
+### Extension not connected
+
+Make sure you:
+1. Used `praisonai browser launch` (recommended)
+2. Or started the bridge server first: `praisonai browser start`
+
+> **Note:** Gemini Nano fallback is disabled. The extension requires the bridge server for Agent mode.

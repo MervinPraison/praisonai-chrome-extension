@@ -14,6 +14,10 @@ import { CDPClient, createCDPClient } from '../cdp/client';
 import { BrowserAgent } from '../ai/agent';
 import { BridgeClient, getBridgeClient } from '../bridge/client';
 
+// === SERVICE WORKER STARTUP LOG ===
+console.log('[PraisonAI] 🚀 Service worker loading at:', new Date().toISOString());
+console.log('[PraisonAI] Extension ID:', chrome.runtime.id || 'unknown');
+
 // Active CDP sessions by tab ID
 const cdpSessions = new Map<number, CDPClient>();
 const agents = new Map<number, BrowserAgent>();
@@ -21,6 +25,193 @@ const agents = new Map<number, BrowserAgent>();
 // Bridge server connection
 let bridgeClient: BridgeClient | null = null;
 let bridgeConnected = false;
+
+// ============================================================
+// OFFSCREEN DOCUMENT MANAGEMENT
+// The offscreen document provides persistent WebSocket (primary method)
+// This survives service worker termination
+// ============================================================
+let offscreenCreating: Promise<void> | null = null;
+let offscreenBridgeConnected = false;
+let offscreenReady = false;
+let offscreenReadyResolver: (() => void) | null = null;
+
+/**
+ * Ensure offscreen document exists
+ */
+async function ensureOffscreen(): Promise<boolean> {
+    const OFFSCREEN_PATH = 'offscreen.html';
+
+    // Check if already exists
+    if (await hasOffscreen()) {
+        return true;
+    }
+
+    // Avoid race conditions
+    if (offscreenCreating) {
+        await offscreenCreating;
+        return await hasOffscreen();
+    }
+
+    try {
+        offscreenCreating = chrome.offscreen.createDocument({
+            url: OFFSCREEN_PATH,
+            reasons: [chrome.offscreen.Reason.BLOBS as chrome.offscreen.Reason],
+            justification: 'Persistent WebSocket connection for PraisonAI bridge server',
+        });
+        await offscreenCreating;
+        console.log('[PraisonAI] ✓ Offscreen document created');
+        return true;
+    } catch (error) {
+        console.error('[PraisonAI] Failed to create offscreen document:', error);
+        return false;
+    } finally {
+        offscreenCreating = null;
+    }
+}
+
+/**
+ * Check if offscreen document exists
+ */
+async function hasOffscreen(): Promise<boolean> {
+    try {
+        const contexts = await chrome.runtime.getContexts({
+            contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
+        });
+        return contexts.length > 0;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Connect bridge via offscreen document (primary method)
+ * 
+ * CRITICAL: The offscreen document takes time to fully load and register its
+ * message listener. We must wait and retry to avoid "Receiving end does not exist" errors.
+ */
+async function connectBridgeViaOffscreen(): Promise<boolean> {
+    console.log('[PraisonAI] Attempting offscreen bridge connection...');
+
+    if (!(await ensureOffscreen())) {
+        console.warn('[PraisonAI] Offscreen not available, falling back to service worker');
+        return false;
+    }
+
+    // Wait for offscreen to signal it's ready (event-driven, not hardcoded delay)
+    // Falls back to short delay if READY signal was missed
+    if (!offscreenReady) {
+        console.log('[PraisonAI] Waiting for offscreen READY signal...');
+        const readyPromise = new Promise<void>((resolve) => {
+            offscreenReadyResolver = resolve;
+            // Timeout fallback in case READY was missed
+            setTimeout(() => {
+                if (!offscreenReady) {
+                    console.log('[PraisonAI] READY timeout - continuing anyway');
+                    resolve();
+                }
+            }, 500); // Much shorter than original 1s delay
+        });
+        await readyPromise;
+    }
+
+    // Retry logic - offscreen may take time to be ready
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 300; // Reduced from 500ms since READY signal arrived
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[PraisonAI] Offscreen connect attempt ${attempt}/${MAX_RETRIES}...`);
+            // CRITICAL: Add target field per official Chrome pattern
+            const response = await chrome.runtime.sendMessage({
+                target: 'offscreen',
+                type: 'OFFSCREEN_CONNECT_BRIDGE'
+            });
+            console.log('[PraisonAI] Offscreen connect response:', response);
+
+            if (response?.success) {
+                return true;
+            }
+
+            // Response received but not success - offscreen may have handled it
+            // Wait and check status
+            await new Promise(r => setTimeout(r, RETRY_DELAY));
+        } catch (error) {
+            console.warn(`[PraisonAI] Offscreen connect attempt ${attempt} failed:`, error);
+
+            if (attempt < MAX_RETRIES) {
+                await new Promise(r => setTimeout(r, RETRY_DELAY));
+            }
+        }
+    }
+
+    console.error('[PraisonAI] All offscreen connect attempts failed');
+    return false;
+}
+
+/**
+ * Check offscreen bridge status
+ */
+async function getOffscreenBridgeStatus(): Promise<{ connected: boolean; readyState: number }> {
+    if (!(await hasOffscreen())) {
+        return { connected: false, readyState: -1 };
+    }
+
+    try {
+        const response = await chrome.runtime.sendMessage({
+            target: 'offscreen',
+            type: 'OFFSCREEN_BRIDGE_STATUS'
+        });
+        return { connected: response?.connected ?? false, readyState: response?.readyState ?? -1 };
+    } catch {
+        return { connected: false, readyState: -1 };
+    }
+}
+
+/**
+ * Send message via offscreen bridge
+ */
+async function sendViaOffscreen(data: string): Promise<boolean> {
+    try {
+        const response = await chrome.runtime.sendMessage({
+            target: 'offscreen',
+            type: 'OFFSCREEN_SEND_BRIDGE',
+            data
+        });
+        return response?.success ?? false;
+    } catch {
+        return false;
+    }
+}
+
+// ============================================================
+// KEEP-ALIVE PORT HANDLER
+// Content scripts open a persistent port to keep the service worker alive
+// This is critical for Chrome MV3 which aggressively terminates service workers
+// ============================================================
+const keepAlivePorts = new Set<chrome.runtime.Port>();
+
+chrome.runtime.onConnect.addListener((port) => {
+    if (port.name === 'keepAlive') {
+        console.log('[PraisonAI] Keep-alive port connected from content script');
+        keepAlivePorts.add(port);
+
+        // Trigger bridge connection when content script connects
+        initBridgeConnection().catch(console.error);
+
+        port.onMessage.addListener((msg) => {
+            if (msg.type === 'ping') {
+                // Respond with pong to keep the connection active
+                port.postMessage({ type: 'pong' });
+            }
+        });
+
+        port.onDisconnect.addListener(() => {
+            console.log('[PraisonAI] Keep-alive port disconnected');
+            keepAlivePorts.delete(port);
+        });
+    }
+});
 
 // *** FIX: Session cleanup lock to prevent race conditions ***
 let sessionCleanupInProgress = false;
@@ -234,12 +425,221 @@ let currentSessionGoal = '';
 
 /**
  * Initialize bridge connection
+ * 
+ * Multi-layer approach:
+ * 1. OFFSCREEN DOCUMENT (PRIMARY) - Persistent, survives service worker termination
+ * 2. SERVICE WORKER (FALLBACK) - May terminate, but works as backup
  */
 async function initBridgeConnection(): Promise<boolean> {
-    if (bridgeClient && bridgeConnected) {
+    console.log('[PraisonAI] initBridgeConnection() called');
+
+    // Check if already connected via offscreen
+    const offscreenStatus = await getOffscreenBridgeStatus();
+    if (offscreenStatus.connected) {
+        console.log('[PraisonAI] Already connected via offscreen document');
+        bridgeConnected = true;
         return true;
     }
 
+    // Check if already connected via service worker
+    if (bridgeClient && bridgeConnected) {
+        console.log('[PraisonAI] Already connected via service worker');
+        return true;
+    }
+
+    // ============================================================
+    // LAYER 1: Try offscreen document (primary - persistent)
+    // ============================================================
+    console.log('[PraisonAI] Layer 1: Attempting offscreen bridge connection...');
+    const offscreenConnected = await connectBridgeViaOffscreen();
+    if (offscreenConnected) {
+        offscreenBridgeConnected = true;
+        bridgeConnected = true;
+        console.log('[PraisonAI] ✓ Connected via offscreen document (persistent)');
+
+        // *** FIX: Always create bridgeClient to handle forwarded messages ***
+        // Even though offscreen handles WebSocket, we need bridgeClient to:
+        // 1. Parse and route OFFSCREEN_BRIDGE_MESSAGE messages
+        // 2. Handle onStartAutomation and other callbacks
+        // 3. Execute CDP commands via its methods
+        if (!bridgeClient) {
+            console.log('[PraisonAI] Creating bridgeClient for offscreen message handling...');
+            bridgeClient = getBridgeClient({
+                serverUrl: 'ws://localhost:8765/ws',
+                maxReconnectAttempts: 0, // Don't connect - offscreen handles WebSocket
+                autoConnect: false, // Prevent actual connection
+            });
+
+            // Setup the same handlers as Layer 2
+            bridgeClient.onStateChange = (state) => {
+                // State is managed by offscreen, but log for debugging
+                console.log(`[PraisonAI] BridgeClient state (offscreen mode): ${state}`);
+            };
+
+            bridgeClient.onAction = (action) => {
+                console.log(`[PraisonAI] Bridge action:`, action);
+                chrome.runtime.sendMessage({
+                    type: 'BRIDGE_ACTION',
+                    action,
+                }).catch(() => { });
+            };
+
+            bridgeClient.onThought = (thought) => {
+                chrome.runtime.sendMessage({
+                    type: 'BRIDGE_THOUGHT',
+                    thought,
+                }).catch(() => { });
+            };
+
+            bridgeClient.onError = (error) => {
+                console.error(`[PraisonAI] Bridge error:`, error);
+                chrome.runtime.sendMessage({
+                    type: 'BRIDGE_ERROR',
+                    error,
+                }).catch(() => { });
+            };
+
+            // Handler for server-triggered automation (from CLI)
+            bridgeClient.onStartAutomation = async (goal, sessionId, hadPreviousSession) => {
+                try {
+                    console.log(`[PraisonAI] Starting automation from server: ${goal}`);
+                    console.log(`[PraisonAI] sessionId=${sessionId}, hadPreviousSession=${hadPreviousSession}, lastSessionTabId=${lastSessionTabId}`);
+
+                    // Cleanup any existing debugger
+                    console.log(`[PraisonAI] Session cleanup - hadPreviousSession=${hadPreviousSession}, lastSessionTabId=${lastSessionTabId}`);
+                    await ensureNoActiveDebugger(lastSessionTabId || undefined);
+                    await new Promise(resolve => setTimeout(resolve, 500));
+
+                    // Get current active tab or find a suitable one
+                    let tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+                    let tab = tabs[0];
+
+                    // If no tab or tab is a chrome:// URL, create a new tab
+                    if (!tab?.id || tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://')) {
+                        console.log('[PraisonAI] Active tab is not suitable, creating new tab');
+                        tab = await chrome.tabs.create({ url: 'https://www.google.com', active: true });
+
+                        // Wait for tab to fully load
+                        if (tab.id) {
+                            const tabId = tab.id;
+                            await new Promise<void>((resolve) => {
+                                const onUpdated = (id: number, info: chrome.tabs.TabChangeInfo) => {
+                                    if (id === tabId && info.status === 'complete') {
+                                        chrome.tabs.onUpdated.removeListener(onUpdated);
+                                        resolve();
+                                    }
+                                };
+                                chrome.tabs.onUpdated.addListener(onUpdated);
+                                setTimeout(() => {
+                                    chrome.tabs.onUpdated.removeListener(onUpdated);
+                                    resolve();
+                                }, 10000);
+                            });
+                            console.log('[PraisonAI] New tab loaded');
+                        }
+                    }
+
+                    if (!tab?.id) {
+                        console.error('[PraisonAI] No suitable tab for automation');
+                        return;
+                    }
+
+                    await ensureNoActiveDebugger(tab.id);
+
+                    // Create CDP client for this tab
+                    const cdpResult = await createCDPClient(tab.id);
+                    if (!cdpResult.success || !cdpResult.data) {
+                        console.error('[PraisonAI] Failed to create CDP client:', cdpResult.error);
+                        return;
+                    }
+                    const cdpClient = cdpResult.data;
+                    cdpSessions.set(tab.id, cdpClient);
+                    lastSessionTabId = tab.id;
+
+                    await setSessionState({
+                        activeTabId: tab.id,
+                        sessionId: sessionId,
+                        isActive: true,
+                    });
+
+                    bridgeClient.setCDPClient(cdpClient);
+                    sessionActionLog.length = 0;
+                    currentSessionGoal = goal;
+
+                    // Setup action handler for CLI-triggered automation
+                    const tabId = tab.id!;
+                    bridgeClient.onAction = async (action) => {
+                        console.log('[PraisonAI] CLI action received:', action.action);
+
+                        if (action.done || action.action === 'done') {
+                            console.log('[PraisonAI] CLI task completed - stopping session');
+                            const client = cdpSessions.get(tabId);
+                            if (client) {
+                                client.disconnect().catch(() => { });
+                                cdpSessions.delete(tabId);
+                            }
+                            await bridgeClient?.stopSession();
+                            return;
+                        }
+
+                        const currentStep = (bridgeClient?.currentStep || 0) + 1;
+                        console.log(`[PraisonAI] CLI Step ${currentStep}`);
+
+                        const selector = action.selector || action.element || '';
+                        sessionActionLog.push({
+                            action: action.action,
+                            selector,
+                            success: true,
+                            url: '',
+                        });
+
+                        try {
+                            const result = await bridgeClient!.executeAction(action);
+                            if (sessionActionLog.length > 0) {
+                                sessionActionLog[sessionActionLog.length - 1].success = result.success;
+                                sessionActionLog[sessionActionLog.length - 1].error = result.error;
+                            }
+                            await sendObservationToBridge(tabId, goal, cdpClient, result.error);
+                        } catch (error) {
+                            console.error('[PraisonAI] CLI action error:', error);
+                            await sendObservationToBridge(tabId, goal, cdpClient, String(error));
+                        }
+                    };
+
+                    // Send first observation to server to start the loop
+                    console.log('[PraisonAI] About to send first observation to bridge');
+                    await sendObservationToBridge(tab.id, goal, cdpClient);
+                    console.log('[PraisonAI] First observation sent successfully');
+                } catch (error) {
+                    console.error('[PraisonAI] onStartAutomation FATAL ERROR:', error);
+                    try {
+                        bridgeClient?.sendObservation({
+                            task: goal,
+                            url: 'error',
+                            title: 'Error',
+                            screenshot: '',
+                            elements: [],
+                            console_logs: [],
+                            step_number: 0,
+                            error: `Extension error: ${error}`,
+                        } as any);
+                    } catch (e) {
+                        console.error('[PraisonAI] Failed to send error observation:', e);
+                    }
+                }
+            };
+
+            console.log('[PraisonAI] ✓ BridgeClient created for offscreen message handling');
+        }
+
+        return true;
+    }
+
+
+    // ============================================================
+    // LAYER 2: Fall back to service worker (backup - may terminate)
+    // ============================================================
+    console.log('[PraisonAI] Layer 2: Falling back to service worker bridge...');
     bridgeClient = getBridgeClient({
         serverUrl: 'ws://localhost:8765/ws',
         maxReconnectAttempts: 3,
@@ -439,10 +839,55 @@ async function initBridgeConnection(): Promise<boolean> {
     return bridgeClient.connect();
 }
 
-// Try to connect to bridge server on startup
-initBridgeConnection().catch(console.error);
+// ============================================================
+// STARTUP SEQUENCE
+// 1. Create offscreen document FIRST (this is persistent)
+// 2. Then connect to bridge (offscreen will auto-connect)
+// ============================================================
+console.log('[PraisonAI] Starting up - creating offscreen document FIRST...');
 
-// Setup periodic reconnection check using chrome.alarms (guard for API availability)
+// Create offscreen document immediately - this is the key to persistent connection
+ensureOffscreen().then((created) => {
+    console.log('[PraisonAI] Offscreen document ready:', created);
+
+    // Give offscreen time to auto-connect
+    setTimeout(() => {
+        console.log('[PraisonAI] Checking bridge connection status...');
+        initBridgeConnection().catch((err) => {
+            console.error('[PraisonAI] Bridge connection failed:', err);
+        });
+    }, 1000);
+}).catch((err) => {
+    console.error('[PraisonAI] Failed to create offscreen document:', err);
+    console.log('[PraisonAI] Falling back to service worker bridge...');
+    initBridgeConnection().catch((err) => {
+        console.error('[PraisonAI] Fallback bridge connection failed:', err);
+    });
+});
+
+// ============================================================
+// AGGRESSIVE KEEP-ALIVE MECHANISM
+// Chrome 116+ keeps service workers alive while WebSocket is active
+// Use setInterval to ensure we keep trying to connect and stay alive
+// ============================================================
+const KEEPALIVE_INTERVAL = 20000; // 20 seconds (under 30s timeout)
+
+setInterval(() => {
+    console.log('[PraisonAI] Keep-alive tick, bridgeConnected:', bridgeConnected);
+
+    if (!bridgeConnected) {
+        console.log('[PraisonAI] Not connected, attempting reconnection...');
+        initBridgeConnection().catch(console.error);
+    }
+}, KEEPALIVE_INTERVAL);
+
+// Expose initBridgeConnection on globalThis for CDP access
+// This allows external tools to wake the service worker via Runtime.evaluate
+(globalThis as any).initBridgeConnection = initBridgeConnection;
+(globalThis as any).getBridgeConnected = () => bridgeConnected;
+console.log('[PraisonAI] initBridgeConnection exposed on globalThis');
+
+// Setup periodic reconnection check using chrome.alarms (backup mechanism)
 if (chrome.alarms?.create) {
     chrome.alarms.create('bridgeReconnect', { periodInMinutes: 0.5 }); // Every 30 seconds
 }
@@ -452,12 +897,28 @@ if (chrome.alarms?.onAlarm) {
         if (alarm.name === 'bridgeReconnect') {
             // If not connected, try to reconnect
             if (!bridgeConnected && bridgeClient) {
-                console.log('[PraisonAI] Attempting periodic reconnection...');
+                console.log('[PraisonAI] Attempting periodic reconnection via alarm...');
                 bridgeClient.connect().catch(console.error);
             }
         }
     });
 }
+
+// Wake service worker on tab events - ensures connection when Chrome opens
+chrome.tabs.onCreated.addListener((tab) => {
+    console.log('[PraisonAI] Tab created, ensuring bridge connection...');
+    if (!bridgeConnected) {
+        initBridgeConnection().catch(e => console.error('[PraisonAI] Bridge init on tab create failed:', e));
+    }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    // Only trigger on complete status to avoid duplicate calls
+    if (changeInfo.status === 'complete' && !bridgeConnected) {
+        console.log('[PraisonAI] Tab updated, ensuring bridge connection...');
+        initBridgeConnection().catch(e => console.error('[PraisonAI] Bridge init on tab update failed:', e));
+    }
+});
 
 /**
  * Side Panel lifecycle events (Chrome 141+)
@@ -560,6 +1021,18 @@ chrome.runtime.onInstalled.addListener(async () => {
     if (chrome.sidePanel?.setPanelBehavior) {
         await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
     }
+
+    // Initialize bridge connection on install
+    console.log('[PraisonAI] Initializing bridge connection on install...');
+    initBridgeConnection().catch(e => console.error('[PraisonAI] Bridge init on install failed:', e));
+});
+
+/**
+ * Initialize extension on Chrome startup (triggers service worker wake)
+ */
+chrome.runtime.onStartup.addListener(async () => {
+    console.log('[PraisonAI] Chrome startup - initializing bridge connection...');
+    initBridgeConnection().catch(e => console.error('[PraisonAI] Bridge init on startup failed:', e));
 });
 
 /**
@@ -672,7 +1145,62 @@ async function handleMessage(
         case 'GET_CONSOLE_LOGS':
             return consoleLogs.get(tabId!) || [];
 
+        // === Content Script Wake-up ===
+        case 'CONTENT_SCRIPT_READY':
+            // Content script loaded - ensure bridge is connected
+            console.log('[PraisonAI] Content script ready, ensuring bridge connection...');
+            if (!bridgeConnected) {
+                initBridgeConnection().catch(e => console.error('[PraisonAI] Bridge init failed:', e));
+            }
+            return { success: true, connected: bridgeConnected };
+
+        // ============================================================
+        // OFFSCREEN DOCUMENT MESSAGES
+        // ============================================================
+        case 'OFFSCREEN_READY':
+            // Offscreen document signals it's ready to receive messages
+            console.log('[PraisonAI] Offscreen document READY signal received');
+            offscreenReady = true;
+            if (offscreenReadyResolver) {
+                offscreenReadyResolver();
+                offscreenReadyResolver = null;
+            }
+            return { success: true };
+
+        case 'OFFSCREEN_BRIDGE_CONNECTED':
+            // Offscreen document reports bridge connection state
+            offscreenBridgeConnected = message.connected as boolean;
+            bridgeConnected = message.connected as boolean;
+            console.log('[PraisonAI] Offscreen bridge connected:', offscreenBridgeConnected);
+
+            // Notify side panel
+            chrome.runtime.sendMessage({
+                type: 'BRIDGE_STATE',
+                connected: bridgeConnected,
+            }).catch(() => { });
+            return { success: true };
+
+        case 'OFFSCREEN_BRIDGE_MESSAGE':
+            // Forward message from offscreen to appropriate handler
+            console.log('[PraisonAI] OFFSCREEN_BRIDGE_MESSAGE received, bridgeClient exists:', !!bridgeClient);
+            console.log('[PraisonAI] Message data:', (message.data as string)?.substring(0, 200));
+
+            // handleMessage expects a string (it parses JSON internally)
+            if (bridgeClient && message.data) {
+                console.log('[PraisonAI] Calling bridgeClient.handleMessage...');
+                bridgeClient.handleMessage(message.data as string);
+            } else {
+                console.error('[PraisonAI] Cannot forward message - bridgeClient:', !!bridgeClient, 'data:', !!message.data);
+            }
+            return { success: true };
+
+
         default:
+            // NOTE: With proper target-based routing (per official Chrome pattern),
+            // OFFSCREEN_ messages are now only handled by offscreen.ts since they have
+            // target: 'offscreen' and offscreen returns false if target doesn't match.
+            // This default case should only be reached for truly unknown messages.
+            console.warn('[PraisonAI] Unknown message type:', message.type);
             return { success: false, error: `Unknown message type: ${message.type}` };
     }
 }
@@ -794,8 +1322,9 @@ async function startAgent(tabId: number, goal: string) {
     }
 
     // Try bridge server first (PraisonAI)
-    if (bridgeClient && bridgeConnected) {
-        console.log('[PraisonAI] Starting session via bridge server');
+    // Check BOTH offscreen connection (primary) AND direct bridge connection (fallback)
+    if (bridgeClient && (offscreenBridgeConnected || bridgeConnected)) {
+        console.log('[PraisonAI] Starting session via bridge server (offscreen:', offscreenBridgeConnected, ', direct:', bridgeConnected, ')');
 
         // Reset session state
         sessionActionLog = [];
@@ -808,6 +1337,7 @@ async function startAgent(tabId: number, goal: string) {
         // Setup action handler with retry detection
         const actionHistory: { action: string; selector: string; count: number }[] = [];
         let lastActionResult: { success: boolean; error?: string } | null = null;
+        let failedClicksWithoutUrlChange = 0;  // Track clicks that don't navigate
 
         bridgeClient.onAction = async (action) => {
             console.log('[PraisonAI] Received action:', action);
@@ -876,17 +1406,42 @@ async function startAgent(tabId: number, goal: string) {
                 const result = await bridgeClient!.executeAction(action);
                 lastActionResult = { success: result.success, error: result.error };
 
+                // *** FIX: Detect clicks that don't change URL (failed navigation) ***
+                let clickError = result.error;
+                if (action.action === 'click' && result.success) {
+                    // Wait a bit for navigation to start
+                    await new Promise(r => setTimeout(r, 500));
+                    const newPageState = await client.getPageState();
+                    const newUrl = newPageState.data?.url || '';
+
+                    if (newUrl === currentUrl) {
+                        // URL didn't change - count as failed click
+                        failedClicksWithoutUrlChange++;
+                        console.log(`[PraisonAI] Click didn't change URL (${failedClicksWithoutUrlChange} times)`);
+
+                        if (failedClicksWithoutUrlChange >= 3) {
+                            clickError = `CLICK DID NOT NAVIGATE! Tried ${failedClicksWithoutUrlChange} times with no URL change. The selector "${actionSelector}" is not clickable or is incorrect. TRY: 1) Use "navigate" action with URL directly, 2) Use a completely different selector, 3) Look for visible link text instead of icon elements`;
+                            console.log('[PraisonAI] Multiple failed clicks without URL change, forcing different approach');
+                        }
+                    } else {
+                        // URL changed - reset counter
+                        failedClicksWithoutUrlChange = 0;
+                        console.log(`[PraisonAI] URL changed: ${currentUrl.slice(0, 50)} -> ${newUrl.slice(0, 50)}`);
+                    }
+                }
+
                 // Log to session action log for progress tracking
                 sessionActionLog.push({
                     action: action.action,
                     selector: actionSelector,
-                    success: result.success,
+                    success: result.success && !clickError,
                     url: currentUrl,
-                    error: result.error,  // Include error message
+                    error: clickError,  // Include error message
                 });
 
                 // Send next observation with last action result (including error)
-                await sendObservationToBridge(tabId, goal, client, result.error);
+                await sendObservationToBridge(tabId, goal, client, clickError);
+
             } catch (error) {
                 console.error('[PraisonAI] Action failed:', error);
                 lastActionResult = { success: false, error: String(error) };
@@ -916,30 +1471,24 @@ async function startAgent(tabId: number, goal: string) {
         return { success: true, data: 'Agent started via PraisonAI bridge' };
     }
 
-    // Fallback to local agent (built-in AI)
-    console.log('[PraisonAI] Bridge unavailable, using local agent');
-    const agent = new BrowserAgent(client);
-    agents.set(tabId, agent);
+    // *** DISABLED: Gemini Nano fallback ***
+    // Gemini Nano is a text-only model and does NOT support vision/screenshots.
+    // Using it causes incorrect "wait" actions because it cannot see the page.
+    // Instead, return an error asking user to connect the bridge server.
+    console.error('[PraisonAI] Bridge unavailable - Gemini Nano fallback DISABLED');
+    console.error('[PraisonAI] To use browser automation, run: praisonai browser launch "your goal"');
 
-    // Run agent in background
-    agent.run(goal, (step) => {
-        // Notify side panel of each step
-        chrome.runtime.sendMessage({
-            type: 'AGENT_STEP',
-            tabId,
-            step,
-        }).catch(() => {
-            // Side panel might not be listening
-        });
-    });
-
-    return { success: true, data: 'Agent started' };
+    return {
+        success: false,
+        error: 'Bridge server not connected. Gemini Nano fallback is disabled because it does not support vision. Please run: praisonai browser launch "your goal"'
+    };
 }
 
 /**
  * Send observation to bridge server
  */
 async function sendObservationToBridge(tabId: number, goal: string, client: CDPClient, lastActionError?: string) {
+
     try {
         // Get page state
         const pageState = await client.getPageState();

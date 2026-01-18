@@ -1,23 +1,25 @@
 # PraisonAI Chrome Extension
 
-AI-powered browser automation with Side Panel and Built-in AI (Gemini Nano).
+AI-powered browser automation with Side Panel and PraisonAI Agent integration.
 
 ## Features
 
-- 🤖 **Browser Agent** - Project Mariner-style AI agent that observes, decides, and acts
-- 🧠 **Built-in AI** - On-device Gemini Nano for privacy-first AI features
+- 🤖 **Browser Agent** - AI agent that observes screenshots, decides, and acts
+- 🌉 **Bridge Server** - Connects to PraisonAI for vision-capable LLMs (GPT-4o, Gemini, Claude)
 - 🎯 **CDP Automation** - Chrome DevTools Protocol for precise browser control
 - 📌 **Side Panel** - Persistent UI that stays open across tabs
-- 📸 **Screenshots** - Capture page state for AI analysis
+- 📸 **Screenshots** - Capture page state for AI vision analysis
 - 🎥 **Recording** - Record browser sessions as video
 - 📋 **Data Extraction** - Extract structured data from pages
-- 🌐 **Multi-language** - Translate and detect languages on-device
+
+> **Note:** Gemini Nano (Chrome's built-in AI) is **disabled for Agent mode** because it's text-only and cannot process screenshots. Use the CLI with bridge server for reliable automation.
 
 ## Requirements
 
-- Chrome 138+ (for Built-in AI APIs)
-- macOS 13+, Windows 10/11, or Linux
-- 22 GB free storage (for Gemini Nano model)
+- Chrome 120+ 
+- Python 3.10+ with `praisonai` installed
+- API key for vision-capable LLM (OpenAI, Gemini, or Anthropic)
+
 
 ## Quick Install
 
@@ -76,22 +78,41 @@ npm run build
 
 ## Usage
 
-### Agent Mode
+### Agent Mode (Recommended: CLI)
 
-1. Click the extension icon to open Side Panel
-2. Enter a task goal (e.g., "Go to google.com and search for AI")
-3. Click "Start Agent"
-4. Watch the agent execute steps
+The most reliable way to use the browser agent:
+
+```bash
+# Install praisonai if not already
+pip install praisonai
+
+# Set your API key
+export OPENAI_API_KEY="your-key"
+# or: export GEMINI_API_KEY="your-key"
+
+# Launch browser automation
+praisonai browser launch "Go to google.com and search for AI"
+praisonai browser launch "Find flights to Paris" --model gpt-4o
+```
+
+This automatically:
+1. Starts the bridge server
+2. Launches Chrome with the extension
+3. Runs your goal with vision-capable AI
+
+### Side Panel (Requires Bridge Server)
+
+If using the side panel directly:
+
+1. First start the bridge server: `praisonai browser start`
+2. Click the extension icon to open Side Panel
+3. Enter a task goal
+4. Click "Start Agent"
+
+> **Important:** Without the bridge server, you'll see an error. Side panel fallback to Gemini Nano is disabled because it cannot process screenshots.
 
 ### Tools Mode
 
-Use individual tools:
-- **Screenshot** - Capture current page
-- **Summarize** - Summarize page content using AI
-- **Extract Data** - Get structured data (headings, links, images)
-- **Console Logs** - View captured console messages
-
-### Quick Actions
 
 - **Navigate** - Go to a URL
 - **Click** - Click element by CSS selector

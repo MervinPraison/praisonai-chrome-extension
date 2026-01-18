@@ -377,3 +377,65 @@ function getImplicitRole(element: HTMLElement): string {
 
 // Notify that content script is loaded
 console.log('[PraisonAI] Content script loaded');
+
+// ============================================================
+// SERVICE WORKER KEEP-ALIVE MECHANISM
+// Chrome MV3 service workers terminate after ~30s of inactivity
+// Using chrome.runtime.connect keeps the service worker alive
+// Ports disconnect after 5 minutes, so we reconnect every 4.5 min
+// ============================================================
+
+let keepAlivePort: chrome.runtime.Port | null = null;
+let keepAliveInterval: ReturnType<typeof setInterval> | null = null;
+
+function connectToServiceWorker(): void {
+    try {
+        // Open a persistent port to the service worker
+        keepAlivePort = chrome.runtime.connect({ name: 'keepAlive' });
+        console.log('[PraisonAI] Keep-alive port connected');
+
+        // Handle port disconnect (service worker terminated or 5-min timeout)
+        keepAlivePort.onDisconnect.addListener(() => {
+            console.log('[PraisonAI] Keep-alive port disconnected, reconnecting...');
+            keepAlivePort = null;
+            // Reconnect immediately
+            setTimeout(connectToServiceWorker, 100);
+        });
+
+        // Listen for messages from service worker
+        keepAlivePort.onMessage.addListener((msg) => {
+            if (msg.type === 'pong') {
+                console.log('[PraisonAI] Keep-alive pong received');
+            }
+        });
+
+        // Send initial ping
+        keepAlivePort.postMessage({ type: 'ping', url: location.href });
+    } catch (err) {
+        console.log('[PraisonAI] Could not connect to service worker:', err);
+        // Retry after a delay
+        setTimeout(connectToServiceWorker, 1000);
+    }
+}
+
+// Start the keep-alive connection
+connectToServiceWorker();
+
+// Send periodic pings to keep the connection active (every 20 seconds)
+keepAliveInterval = setInterval(() => {
+    if (keepAlivePort) {
+        try {
+            keepAlivePort.postMessage({ type: 'ping' });
+        } catch (err) {
+            console.log('[PraisonAI] Ping failed, reconnecting...');
+            connectToServiceWorker();
+        }
+    } else {
+        connectToServiceWorker();
+    }
+}, 20000);
+
+// Also send the legacy message for backward compatibility
+chrome.runtime.sendMessage({ type: 'CONTENT_SCRIPT_READY', url: location.href })
+    .then(() => console.log('[PraisonAI] Service worker pinged'))
+    .catch(() => console.log('[PraisonAI] Service worker not responding yet'));
