@@ -351,13 +351,35 @@ export class CDPClient {
         // Wait for focus
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        // Clear existing content with Ctrl+A then Backspace
-        // Ctrl+A to select all
+        // TRIPLE-CLEAR APPROACH (robust for all platforms):
+        // 1. Clear via JavaScript directly (most reliable)
+        try {
+            const escapedSelector = selector.replace(/'/g, "\\'");
+            await this.send('Runtime.evaluate', {
+                expression: `
+                    (function() {
+                        const el = document.querySelector('${escapedSelector}');
+                        if (el) {
+                            el.value = '';
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    })()
+                `,
+            });
+            console.log(`[CDP] typeInElement() - cleared via JavaScript`);
+        } catch (e) {
+            console.log(`[CDP] typeInElement() - JS clear failed, falling back to keyboard`);
+        }
+
+        // 2. Also try keyboard Select-All + Delete (backup)
+        // Try BOTH Cmd+A (macOS modifier=4) and Ctrl+A (Windows modifier=2)
+        console.log(`[CDP] typeInElement() - sending Cmd+A (modifier=4) to clear`);
         await this.send('Input.dispatchKeyEvent', {
             type: 'keyDown',
             key: 'a',
             code: 'KeyA',
-            modifiers: 2,  // Ctrl modifier
+            modifiers: 4,  // Meta/Cmd for macOS
         });
         await this.send('Input.dispatchKeyEvent', {
             type: 'keyUp',
@@ -365,7 +387,20 @@ export class CDPClient {
             code: 'KeyA',
         });
 
-        // Backspace to delete selected content
+        // Also send Ctrl+A for Windows/Linux compatibility
+        await this.send('Input.dispatchKeyEvent', {
+            type: 'keyDown',
+            key: 'a',
+            code: 'KeyA',
+            modifiers: 2,  // Ctrl for Windows/Linux
+        });
+        await this.send('Input.dispatchKeyEvent', {
+            type: 'keyUp',
+            key: 'a',
+            code: 'KeyA',
+        });
+
+        // 3. Delete the selected content
         await this.send('Input.dispatchKeyEvent', {
             type: 'keyDown',
             key: 'Backspace',
@@ -379,8 +414,28 @@ export class CDPClient {
 
         await new Promise((resolve) => setTimeout(resolve, 50));
 
+        // Verify text was cleared
+        try {
+            const verifyResult = await this.send('Runtime.evaluate', {
+                expression: `document.querySelector('${selector.replace(/'/g, "\\'")}')?.value || ''`,
+            });
+            const currentValue = (verifyResult as any)?.result?.value || '';
+            if (currentValue) {
+                console.log(`[CDP] typeInElement() - WARNING: Input still has value="${currentValue}", attempting force clear`);
+                // Force clear if still has content
+                await this.send('Runtime.evaluate', {
+                    expression: `document.querySelector('${selector.replace(/'/g, "\\'")}').value = '';`,
+                });
+            } else {
+                console.log(`[CDP] typeInElement() - Input cleared successfully`);
+            }
+        } catch (e) {
+            // Ignore verification errors - some elements don't have .value
+        }
+
         // Now type the new text
         return this.type(text);
+
     }
 
     /**

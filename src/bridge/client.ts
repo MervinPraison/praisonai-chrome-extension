@@ -296,7 +296,7 @@ export class BridgeClient {
                             actionError = clickResult.error || `Click failed on ${selector}`;
                         } else {
                             // Wait for potential navigation after click
-                            await new Promise(r => setTimeout(r, 500));
+                            await new Promise(r => setTimeout(r, 200));  // Optimized: was 500ms
                         }
                     }
                     break;
@@ -346,7 +346,7 @@ export class BridgeClient {
                     await this.cdpClient.send('Input.dispatchKeyEvent', {
                         type: 'keyUp', key: 'Enter', code: 'Enter',
                     });
-                    await new Promise(r => setTimeout(r, 1000));
+                    await new Promise(r => setTimeout(r, 400));  // Optimized: was 1000ms
                     break;
 
                 case 'press':  // press Enter, Tab, etc.
@@ -367,7 +367,7 @@ export class BridgeClient {
                         key: keyToPress,
                         code: keyToPress,
                     });
-                    await new Promise(r => setTimeout(r, 500));
+                    await new Promise(r => setTimeout(r, 200));  // Optimized: was 500ms
                     break;
 
                 case 'submit':
@@ -387,7 +387,7 @@ export class BridgeClient {
                         code: 'Enter',
                     });
                     // Wait for navigation/response
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    await new Promise(resolve => setTimeout(resolve, 300));  // Optimized: was 500ms
                     break;
 
                 case 'scroll':
@@ -406,8 +406,70 @@ export class BridgeClient {
                 case 'wait':
                 case 'waitForNavigation':
                 case 'waitForElement':
-                    console.log('[Bridge] Waiting 1s');
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    console.log('[Bridge] Waiting 500ms');
+                    await new Promise(resolve => setTimeout(resolve, 500));  // Optimized: was 1000ms
+                    break;
+
+                case 'clear_input':
+                    // Clear input field completely - used for fixing garbled/duplicated text
+                    if (selector) {
+                        console.log('[Bridge] Clearing input field:', selector);
+
+                        // 1. Clear via JavaScript (most reliable)
+                        try {
+                            const escapedSelector = selector.replace(/'/g, "\\'");
+                            await this.cdpClient.send('Runtime.evaluate', {
+                                expression: `
+                                    (function() {
+                                        const el = document.querySelector('${escapedSelector}');
+                                        if (el) {
+                                            el.value = '';
+                                            el.focus();
+                                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                                        }
+                                    })()
+                                `,
+                            });
+                            console.log('[Bridge] Input cleared via JavaScript');
+                        } catch (e) {
+                            console.log('[Bridge] JS clear failed, using keyboard');
+                        }
+
+                        // 2. Also click to focus and use keyboard shortcuts as backup
+                        await this.cdpClient.clickElement(selector);
+                        await new Promise(r => setTimeout(r, 100));
+
+                        // Send Ctrl+A followed by Delete
+                        await this.cdpClient.send('Input.dispatchKeyEvent', {
+                            type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2,
+                        });
+                        await this.cdpClient.send('Input.dispatchKeyEvent', {
+                            type: 'keyUp', key: 'a', code: 'KeyA',
+                        });
+                        await this.cdpClient.send('Input.dispatchKeyEvent', {
+                            type: 'keyDown', key: 'Delete', code: 'Delete',
+                        });
+                        await this.cdpClient.send('Input.dispatchKeyEvent', {
+                            type: 'keyUp', key: 'Delete', code: 'Delete',
+                        });
+
+                        // Also Cmd+A (macOS)
+                        await this.cdpClient.send('Input.dispatchKeyEvent', {
+                            type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 4,
+                        });
+                        await this.cdpClient.send('Input.dispatchKeyEvent', {
+                            type: 'keyUp', key: 'a', code: 'KeyA',
+                        });
+                        await this.cdpClient.send('Input.dispatchKeyEvent', {
+                            type: 'keyDown', key: 'Backspace', code: 'Backspace',
+                        });
+                        await this.cdpClient.send('Input.dispatchKeyEvent', {
+                            type: 'keyUp', key: 'Backspace', code: 'Backspace',
+                        });
+
+                        console.log('[Bridge] Input field cleared');
+                    }
                     break;
 
                 case 'screenshot':
