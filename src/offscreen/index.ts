@@ -108,11 +108,14 @@ function connectToBridge(): void {
  * Send message to bridge server
  */
 function sendToBridge(message: string): boolean {
+    console.log('[Offscreen] sendToBridge called, ws state:', bridgeState.ws?.readyState, 'connected:', bridgeState.connected);
     if (bridgeState.ws?.readyState === WebSocket.OPEN) {
+        console.log('[Offscreen] Sending message to bridge:', message.substring(0, 100));
         bridgeState.ws.send(message);
+        console.log('[Offscreen] Message sent successfully');
         return true;
     }
-    console.warn('[Offscreen] Cannot send - not connected to bridge');
+    console.error('[Offscreen] Cannot send - WebSocket not open. State:', bridgeState.ws?.readyState);
     return false;
 }
 
@@ -199,7 +202,9 @@ async function handleMessage(message: {
             return { success: true };
 
         case 'OFFSCREEN_SEND_BRIDGE':
+            console.log('[Offscreen] OFFSCREEN_SEND_BRIDGE received');
             const sent = sendToBridge(message.data as string);
+            console.log('[Offscreen] OFFSCREEN_SEND_BRIDGE result:', sent);
             return { success: sent };
 
         case 'OFFSCREEN_BRIDGE_STATUS':

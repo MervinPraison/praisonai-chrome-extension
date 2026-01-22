@@ -437,109 +437,7 @@ async function initBridgeConnection(): Promise<boolean> {
     const offscreenStatus = await getOffscreenBridgeStatus();
     if (offscreenStatus.connected) {
         console.log('[PraisonAI] Already connected via offscreen document');
-        offscreenBridgeConnected = true;
         bridgeConnected = true;
-        
-        // *** FIX: MUST create bridgeClient even if offscreen already connected ***
-        // Without this, OFFSCREEN_BRIDGE_MESSAGE won't be handled!
-        if (!bridgeClient) {
-            console.log('[PraisonAI] Creating bridgeClient for existing offscreen connection...');
-            bridgeClient = getBridgeClient({
-                serverUrl: 'ws://localhost:8765/ws',
-                maxReconnectAttempts: 0,
-            });
-            
-            // Setup handlers inline (same as Layer 1 setup below)
-            bridgeClient.onStateChange = (state) => {
-                console.log(`[PraisonAI] BridgeClient state (offscreen mode): ${state}`);
-            };
-            bridgeClient.onAction = (action) => {
-                console.log(`[PraisonAI] Bridge action:`, action);
-                chrome.runtime.sendMessage({ type: 'BRIDGE_ACTION', action }).catch(() => { });
-            };
-            bridgeClient.onThought = (thought) => {
-                chrome.runtime.sendMessage({ type: 'BRIDGE_THOUGHT', thought }).catch(() => { });
-            };
-            bridgeClient.onError = (error) => {
-                console.error(`[PraisonAI] Bridge error:`, error);
-                chrome.runtime.sendMessage({ type: 'BRIDGE_ERROR', error }).catch(() => { });
-            };
-            bridgeClient.onStartAutomation = async (goal, sessionId, hadPreviousSession) => {
-                try {
-                    console.log(`[PraisonAI] Starting automation from server: ${goal}`);
-                    console.log(`[PraisonAI] sessionId=${sessionId}, hadPreviousSession=${hadPreviousSession}`);
-                    
-                    await ensureNoActiveDebugger(lastSessionTabId || undefined);
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    
-                    let tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-                    let tab = tabs[0];
-                    
-                    if (!tab?.id || tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://')) {
-                        console.log('[PraisonAI] Active tab is not suitable, creating new tab');
-                        tab = await chrome.tabs.create({ url: 'https://www.google.com', active: true });
-                        if (tab.id) {
-                            const tabId = tab.id;
-                            await new Promise<void>((resolve) => {
-                                const onUpdated = (id: number, info: chrome.tabs.TabChangeInfo) => {
-                                    if (id === tabId && info.status === 'complete') {
-                                        chrome.tabs.onUpdated.removeListener(onUpdated);
-                                        resolve();
-                                    }
-                                };
-                                chrome.tabs.onUpdated.addListener(onUpdated);
-                                setTimeout(() => { chrome.tabs.onUpdated.removeListener(onUpdated); resolve(); }, 10000);
-                            });
-                        }
-                    }
-                    
-                    if (!tab?.id) {
-                        console.error('[PraisonAI] No suitable tab for automation');
-                        return;
-                    }
-                    
-                    await ensureNoActiveDebugger(tab.id);
-                    const cdpResult = await createCDPClient(tab.id);
-                    if (!cdpResult.success || !cdpResult.data) {
-                        console.error('[PraisonAI] Failed to create CDP client:', cdpResult.error);
-                        return;
-                    }
-                    const cdpClient = cdpResult.data;
-                    cdpSessions.set(tab.id, cdpClient);
-                    lastSessionTabId = tab.id;
-                    
-                    await setSessionState({ activeTabId: tab.id, sessionId: sessionId, isActive: true });
-                    bridgeClient!.setCDPClient(cdpClient);
-                    sessionActionLog.length = 0;
-                    currentSessionGoal = goal;
-                    
-                    // Setup action handler
-                    const tabId = tab.id!;
-                    bridgeClient!.onAction = async (action) => {
-                        console.log('[PraisonAI] CLI action received:', action.action);
-                        if (action.done || action.action === 'done') {
-                            console.log('[PraisonAI] CLI task completed');
-                            await bridgeClient?.stopSession();
-                            return;
-                        }
-                        try {
-                            const result = await bridgeClient!.executeAction(action);
-                            await sendObservationToBridge(tabId, goal, cdpClient, result.error);
-                        } catch (error) {
-                            console.error('[PraisonAI] CLI action error:', error);
-                            await sendObservationToBridge(tabId, goal, cdpClient, String(error));
-                        }
-                    };
-                    
-                    console.log('[PraisonAI] About to send first observation to bridge');
-                    await sendObservationToBridge(tab.id, goal, cdpClient);
-                    console.log('[PraisonAI] First observation sent successfully');
-                } catch (error) {
-                    console.error('[PraisonAI] onStartAutomation FATAL ERROR:', error);
-                }
-            };
-            console.log('[PraisonAI] ✓ BridgeClient created for existing offscreen connection');
-        }
         return true;
     }
 
@@ -1284,108 +1182,13 @@ async function handleMessage(
 
         case 'OFFSCREEN_BRIDGE_MESSAGE':
             // Forward message from offscreen to appropriate handler
-            console.log('[PraisonAI] OFFSCREEN_BRIDGE_MESSAGE received');
-            console.log('[PraisonAI] bridgeClient exists:', !!bridgeClient);
+            console.log('[PraisonAI] OFFSCREEN_BRIDGE_MESSAGE received, bridgeClient exists:', !!bridgeClient);
             console.log('[PraisonAI] Message data:', (message.data as string)?.substring(0, 200));
-
-            // *** FIX: Create bridgeClient on-demand if it doesn't exist ***
-            // This handles the case where offscreen connected before service worker initialized bridgeClient
-            if (!bridgeClient && message.data) {
-                console.log('[PraisonAI] Creating bridgeClient on-demand for OFFSCREEN_BRIDGE_MESSAGE...');
-                bridgeClient = getBridgeClient({
-                    serverUrl: 'ws://localhost:8765/ws',
-                    maxReconnectAttempts: 0,
-                });
-                offscreenBridgeConnected = true;
-                bridgeConnected = true;
-                
-                // Setup essential handlers
-                bridgeClient.onStateChange = (state) => {
-                    console.log(`[PraisonAI] BridgeClient state: ${state}`);
-                };
-                bridgeClient.onError = (error) => {
-                    console.error(`[PraisonAI] Bridge error:`, error);
-                };
-                bridgeClient.onStartAutomation = async (goal, sessionId, hadPreviousSession) => {
-                    console.log(`[PraisonAI] *** onStartAutomation TRIGGERED: ${goal} ***`);
-                    try {
-                        await ensureNoActiveDebugger(lastSessionTabId || undefined);
-                        await new Promise(resolve => setTimeout(resolve, 500));
-                        
-                        let tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-                        let tab = tabs[0];
-                        
-                        if (!tab?.id || tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://')) {
-                            tab = await chrome.tabs.create({ url: 'https://www.google.com', active: true });
-                            if (tab.id) {
-                                await new Promise<void>((resolve) => {
-                                    const onUpdated = (id: number, info: chrome.tabs.TabChangeInfo) => {
-                                        if (id === tab.id && info.status === 'complete') {
-                                            chrome.tabs.onUpdated.removeListener(onUpdated);
-                                            resolve();
-                                        }
-                                    };
-                                    chrome.tabs.onUpdated.addListener(onUpdated);
-                                    setTimeout(() => { chrome.tabs.onUpdated.removeListener(onUpdated); resolve(); }, 10000);
-                                });
-                            }
-                        }
-                        
-                        if (!tab?.id) {
-                            console.error('[PraisonAI] No suitable tab');
-                            return;
-                        }
-                        
-                        await ensureNoActiveDebugger(tab.id);
-                        const cdpResult = await createCDPClient(tab.id);
-                        if (!cdpResult.success || !cdpResult.data) {
-                            console.error('[PraisonAI] CDP client failed:', cdpResult.error);
-                            return;
-                        }
-                        
-                        const cdpClient = cdpResult.data;
-                        cdpSessions.set(tab.id, cdpClient);
-                        lastSessionTabId = tab.id;
-                        
-                        await setSessionState({ activeTabId: tab.id, sessionId: sessionId, isActive: true });
-                        bridgeClient!.setCDPClient(cdpClient);
-                        sessionActionLog.length = 0;
-                        currentSessionGoal = goal;
-                        
-                        const tabId = tab.id;
-                        bridgeClient!.onAction = async (action) => {
-                            console.log('[PraisonAI] Action received:', action.action);
-                            if (action.done || action.action === 'done') {
-                                await bridgeClient?.stopSession();
-                                return;
-                            }
-                            try {
-                                const result = await bridgeClient!.executeAction(action);
-                                await sendObservationToBridge(tabId, goal, cdpClient, result.error);
-                            } catch (error) {
-                                await sendObservationToBridge(tabId, goal, cdpClient, String(error));
-                            }
-                        };
-                        
-                        console.log('[PraisonAI] Sending first observation...');
-                        await sendObservationToBridge(tab.id, goal, cdpClient);
-                        console.log('[PraisonAI] First observation sent!');
-                    } catch (error) {
-                        console.error('[PraisonAI] onStartAutomation error:', error);
-                    }
-                };
-                console.log('[PraisonAI] ✓ BridgeClient created on-demand with handlers');
-            }
 
             // handleMessage expects a string (it parses JSON internally)
             if (bridgeClient && message.data) {
                 console.log('[PraisonAI] Calling bridgeClient.handleMessage...');
-                try {
-                    bridgeClient.handleMessage(message.data as string);
-                    console.log('[PraisonAI] bridgeClient.handleMessage completed');
-                } catch (e) {
-                    console.error('[PraisonAI] bridgeClient.handleMessage error:', e);
-                }
+                bridgeClient.handleMessage(message.data as string);
             } else {
                 console.error('[PraisonAI] Cannot forward message - bridgeClient:', !!bridgeClient, 'data:', !!message.data);
             }
@@ -1685,29 +1488,14 @@ async function startAgent(tabId: number, goal: string) {
  * Send observation to bridge server
  */
 async function sendObservationToBridge(tabId: number, goal: string, client: CDPClient, lastActionError?: string) {
-    // CRITICAL: Check if bridgeClient exists and has a valid session
-    if (!bridgeClient) {
-        console.error('[PraisonAI] sendObservationToBridge: No bridgeClient available');
-        return;
-    }
-    
-    // Log session state for debugging
-    console.log(`[PraisonAI] sendObservationToBridge: checking session active...`);
-    
-    if (!bridgeClient.isSessionActive()) {
-        console.error('[PraisonAI] sendObservationToBridge: Session not active - cannot send observation');
-        return;
-    }
 
     try {
         // Get page state
-        console.log('[PraisonAI] Getting page state...');
         const pageState = await client.getPageState();
         if (!pageState.success || !pageState.data) {
-            console.error('[PraisonAI] Failed to get page state:', pageState.error);
+            console.error('[PraisonAI] Failed to get page state');
             return;
         }
-        console.log('[PraisonAI] Page state retrieved:', pageState.data.url);
 
         // Capture screenshot (JPEG for smaller size)
         const screenshot = await client.captureScreenshot('jpeg', 30);
@@ -1758,8 +1546,7 @@ async function sendObservationToBridge(tabId: number, goal: string, client: CDPC
             : 'PROGRESS: 0 actions completed. Just started.';
 
         // Send observation with full context
-        console.log('[PraisonAI] Sending observation to bridge...');
-        const sent = await bridgeClient.sendObservation({
+        await bridgeClient?.sendObservation({
             task: goal,  // Original goal always included
             url: pageState.data.url,
             title: pageState.data.title,
@@ -1774,12 +1561,6 @@ async function sendObservationToBridge(tabId: number, goal: string, client: CDPC
             // Add last action error for LLM to see failures
             last_action_error: lastActionError,
         });
-        
-        if (sent) {
-            console.log('[PraisonAI] ✓ Observation sent successfully');
-        } else {
-            console.error('[PraisonAI] ✗ Observation send returned false - check session state');
-        }
     } catch (error) {
         console.error('[PraisonAI] Failed to send observation:', error);
     }

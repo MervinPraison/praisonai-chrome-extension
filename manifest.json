@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
     "name": "PraisonAI Browser Agent",
-    "version": "1.0.0",
-    "description": "AI-powered browser automation with on-device AI. Navigate, click, type, screenshot, and control your browser with natural language.",
+    "version": "1.0.3",
+    "description": "AI-powered browser automation. Navigate websites, click elements, fill forms, capture screenshots, and record browser sessions. Features side panel interface, keyboard shortcuts, and context menu integration.",
     "author": "MervinPraison",
     "homepage_url": "https://docs.praison.ai",
     "minimum_chrome_version": "116",
