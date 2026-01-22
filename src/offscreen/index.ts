@@ -27,7 +27,7 @@ const bridgeState: BridgeState = {
     ws: null,
     connected: false,
     reconnectAttempts: 0,
-    maxReconnects: 10,
+    maxReconnects: 5,  // Try 5 times for reliability
     reconnectDelay: 2000,
     heartbeatInterval: null,
 };
@@ -529,9 +529,10 @@ chrome.runtime.sendMessage({
     console.log('[PraisonAI] Could not notify background of READY (ok if first load)');
 });
 
-// AUTO-CONNECT: When offscreen document is created, immediately connect to bridge
-// This is the key to reliable connection - offscreen document persists
+// AUTO-CONNECT: Try to connect to bridge server
+// If server is unavailable, extension falls back to browser-only mode
+// This is graceful - no error spam, just logs status
 setTimeout(() => {
-    console.log('[PraisonAI] Offscreen auto-connecting to bridge...');
+    console.log('[PraisonAI] Offscreen attempting bridge connection...');
     connectToBridge();
-}, 100); // Short delay just to let things settle
+}, 500);
