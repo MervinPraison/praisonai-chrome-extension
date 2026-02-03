@@ -20,8 +20,12 @@ nav:
   - Getting Started:
     - Installation: getting-started/installation.md
     - Quick Start: getting-started/quick-start.md
+  - Features:
+    - Browser Agent: features/browser-agent.md
+    - CDP Automation: features/cdp-automation.md
+    - Side Panel: features/side-panel.md
+    - Screenshots & Recording: features/screenshots.md
   - Usage:
-    - Side Panel: usage/side-panel.md
     - CLI Integration: usage/cli-integration.md
   - Architecture:
     - Overview: architecture/overview.md
