@@ -1,8 +1,8 @@
 /**
  * Chrome DevTools Protocol (CDP) Client
  * 
- * Provides low-level browser control via chrome.debugger API.
- * This is the core of browser automation - similar to what Project Mariner uses.
+ * Provides low-level browser control via the chrome.debugger API. Every action
+ * the side panel offers is a CDP command sent from here.
  */
 
 export interface CDPCommand {

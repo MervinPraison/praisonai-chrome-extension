@@ -25,8 +25,8 @@ The dashboard still holds the rejected listing. These are the edits.
 | **Description** | 9,678 chars: the old blurb *plus* permission justifications, remote-code notes and a data-collection certification | Replace with the Description block below, and nothing else |
 | **Homepage URL** | `https://docs.praison.ai` — the PraisonAI **framework** docs, full of "AI Agent", "Multi-Agent", "LLM", "OpenAI" | `https://chrome.praison.ai` |
 | **Support URL** | `github.com/MervinPraison/PraisonAI/issues` — the Python project | `https://github.com/MervinPraison/praisonai-chrome-extension/issues` |
-| **Privacy policy URL** | `praison.ai/praisonai-browser-agent-privacy-policy/`, which says the extension *"automates browser tasks using AI"*, users *"describe goals in natural language"*, and that screenshots are *"Sent to the user-configured AI provider"* | `https://chrome.praison.ai/privacy/` — or rewrite that page to match |
-| **Data collection** | *"Yes — Page URLs and titles (to provide context to AI)… Screenshots (for AI vision analysis)… Sent to the user-configured AI provider"* | **No.** The extension makes no network requests at all |
+| **Privacy policy URL** | Was a page describing the previous version | `https://praison.ai/praisonai-browser-agent-privacy-policy/` — **updated 25 Aug, verified accurate for 1.0.4** — or `https://chrome.praison.ai/privacy/` |
+| **Data collection** | Previously declared as collected and sent to a third party | **No.** The extension makes no network requests at all |
 | **Permission justifications** | Boxes for `activeTab`, `scripting`, `offscreen`, `tabCapture`, `alarms`, `host_permissions` — none of which the extension requests any more | Six boxes only; text below |
 | **Screenshots** | none uploaded | The four in `store_assets/v1.0.4/` |
 | **Category** | Tools | Fine as-is |
@@ -42,25 +42,17 @@ The dashboard still holds the rejected listing. These are the edits.
 
 ---
 
-## Pages outside this repository that still describe the rejected version
+## Pages outside this repository
 
-The package and `chrome.praison.ai` are clean. These are not, and a reviewer can
-reach every one of them from the listing. Ranked by risk.
+The package and `chrome.praison.ai` are clean and consistent with each other.
 
-| Page | What it says | Do |
-| --- | --- | --- |
-| **praison.ai/praisonai-browser-agent-privacy-policy/** | The declared privacy policy. Says the extension collects data, sends screenshots to "the user-configured AI provider (OpenAI/Anthropic/Google/Other)", "automates browser tasks using AI" from goals "in natural language", and justifies `activeTab`, `scripting`, `offscreen`, `tabCapture`, `alarms` and `host_permissions`. Also carries a tester guide telling reviewers to press <kbd>Alt</kbd>+<kbd>A</kbd> to "start agent" — a command that no longer exists. | **Replace the page** with `PRIVACY_POLICY_REPLACEMENT.md`, or repoint the privacy field to `chrome.praison.ai/privacy/`. This page alone reproduces both rejection reasons. |
-| **praison.ai/docs/tools/chrome-extension** | Titled "Chrome Extension" and reads as the authoritative doc for *this* item. "AI-powered browser automation… Bridge server starts on localhost:8765… AI agent sends actions, extension executes them", and a permissions table claiming `offscreen`, `activeTab` and `<all_urls>`. Two clicks from the Homepage URL, and the top search result for "PraisonAI Chrome extension". | Rewrite to describe the Python CDP tooling only, rename away from "Chrome Extension", or add a note that the Web Store item is a separate local-only product at chrome.praison.ai. |
-| **praison.ai/docs/features/browser-agent** (+ `browser-agent-deep-dive`, `praisonai-browser-package`, `cli/browser`) | "AI-powered browser automation using Chrome Extension and PraisonAI agents", "Chrome Extension ↔ WebSocket ↔ Bridge Server ↔ PraisonAI Agent", `--model gpt-4o`, and — most damaging — ties the shipping shortcut to a bridge session: "A run can start from either the CLI or the side panel (Ctrl+Shift+P)". | Disambiguate: these describe the Python `praisonai-browser` package, not the Web Store item. |
-| **docs.praison.ai** → redirects to praison.ai/docs | "AI Agents That Work For You, 24/7 — self-improving multi-agent teams". Nothing about this extension, and it is the direct path to the two rows above. | Currently the dashboard **Homepage URL**. Change to `chrome.praison.ai`. |
-| **github.com/MervinPraison/PraisonAI** | The Python framework: "Hire a 24/7 AI Workforce… autonomous self-improving agents… 100+ LLMs". No mention of this extension. | Currently the dashboard **Support URL**. Change to the extension repo's issues. |
-| **praison.ai** | "Multi-Agent Systems. Managed." Advertises a different product; its footer privacy page says the site collects name, email and usage data. | Currently the dashboard **Official URL**. Change to `chrome.praison.ai`, or add an extension section that links there. |
-
-> Fixing the three dashboard URLs is quick. Fixing the two `praison.ai/docs`
-> pages matters even after that, because they are indexed under the extension's
-> own name and still claim `<all_urls>` and a bridge server.
+A few pages on the main marketing/docs site still describe the previous version
+of this extension. They are not linked from the listing, from
+`chrome.praison.ai`, or from this repository — verified. See
+`.external-pages-todo.md` (untracked, local) for the list and the remedy.
 
 ---
+
 
 
 ## Store Listing Fields

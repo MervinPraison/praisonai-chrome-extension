@@ -66,7 +66,7 @@ any action again to reattach.
 | --- | --- | --- |
 | Navigate to URL | `example.com` | Loads `https://example.com` in the tab, waits for it to finish loading, and fails with the network error if it does not |
 | Click Element | `a` | Clicks the first link on the page |
-| Type Text | selector `input[name=q]`, text `hello` | Clears that field, types `hello`, and checks the text actually landed |
+| Type Text | selector `#searchInput`, text `hello` | Clears that field, types `hello`, and checks the text actually landed. `example.com` has no input to type into — try this one on `wikipedia.org` |
 | Run JavaScript | `location.href` | Prints the current URL |
 | Scroll Page | ↑ / ↓ | Scrolls 500px up or down |
 
