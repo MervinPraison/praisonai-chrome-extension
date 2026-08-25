@@ -1,59 +1,12 @@
 # Chrome Web Store Listing — v1.0.4
 
-> **Read this first.** The rejected submission has the *entire* contents of a file
-> like this one pasted into the **Description** field — permission justifications,
-> remote-code notes, data-usage certification and all. That is very likely where
-> the reviewer's quoted phrase *"AI-powered browser automation server websocket
-> url"* came from, since the description still contained "Local PraisonAI bridge
-> server (localhost)" and "server connection settings".
->
-> **Only paste the block under "Description" into the Description field.**
-> Everything else here belongs in its own dashboard field, or is a note to you.
+Copy for the store listing. Each section names the dashboard field it belongs to;
+nothing here is description text unless it says so.
 
 Every claim below is reproducible on a clean Chrome profile with no server, no
 model, no flags and no sign-in.
 
 ---
-
-## Dashboard: change these, field by field
-
-The dashboard still holds the rejected listing. These are the edits.
-
-| Field | What it holds now | Change it to |
-| --- | --- | --- |
-| **Package** | v1.0.3 | Upload `praisonai-extension-v1.0.4.zip` **first** — it rewrites Title and Summary from the manifest, and it re-generates the permission-justification boxes |
-| **Description** | 9,678 chars: the old blurb *plus* permission justifications, remote-code notes and a data-collection certification | Replace with the Description block below, and nothing else |
-| **Homepage URL** | `https://docs.praison.ai` — the PraisonAI **framework** docs, full of "AI Agent", "Multi-Agent", "LLM", "OpenAI" | `https://chrome.praison.ai` |
-| **Support URL** | `github.com/MervinPraison/PraisonAI/issues` — the Python project | `https://github.com/MervinPraison/praisonai-chrome-extension/issues` |
-| **Privacy policy URL** | Was a page describing the previous version | `https://praison.ai/praisonai-browser-agent-privacy-policy/` — **updated 25 Aug, verified accurate for 1.0.4** — or `https://chrome.praison.ai/privacy/` |
-| **Data collection** | Previously declared as collected and sent to a third party | **No.** The extension makes no network requests at all |
-| **Permission justifications** | Boxes for `activeTab`, `scripting`, `offscreen`, `tabCapture`, `alarms`, `host_permissions` — none of which the extension requests any more | Six boxes only; text below |
-| **Screenshots** | none uploaded | The four in `store_assets/v1.0.4/` |
-| **Category** | Tools | Fine as-is |
-| **Language** | English (United Kingdom) | Fine as-is |
-| **Official URL** | `praison.ai` | Fine, provided that page does not describe an AI browser agent |
-
-> The three URL fields matter as much as the copy. Google defines this
-> violation's "metadata" as the title, icon, description, screenshots **and other
-> developer-provided information** — a Homepage URL pointing at an AI-agent
-> framework is exactly the mismatch that was cited.
-
----
-
----
-
-## Pages outside this repository
-
-The package and `chrome.praison.ai` are clean and consistent with each other.
-
-A few pages on the main marketing/docs site still describe the previous version
-of this extension. They are not linked from the listing, from
-`chrome.praison.ai`, or from this repository — verified. See
-`.external-pages-todo.md` (untracked, local) for the list and the remedy.
-
----
-
-
 
 ## Store Listing Fields
 
