@@ -1,4 +1,4 @@
-site_name: PraisonAI Chrome Extension
+site_name: PraisonAI Browser Agent
 site_url: https://chrome.praison.ai
 repo_url: https://github.com/MervinPraison/praisonai-chrome-extension
 repo_name: praisonai-chrome-extension
@@ -21,18 +21,18 @@ nav:
     - Installation: getting-started/installation.md
     - Quick Start: getting-started/quick-start.md
   - Features:
-    - Browser Agent: features/browser-agent.md
-    - CDP Automation: features/cdp-automation.md
+    - Browser Actions: features/cdp-automation.md
     - Side Panel: features/side-panel.md
-    - Screenshots & Recording: features/screenshots.md
-  - Usage:
-    - CLI Integration: usage/cli-integration.md
+    - Screenshots: features/screenshots.md
+    - Page Data & Console: features/page-data.md
   - Architecture:
     - Overview: architecture/overview.md
     - CDP Client: architecture/cdp-client.md
   - Reference:
-    - Side Panel API: side-panel-api.md
-    - Manifest Reference: manifest-reference.md
+    - Message Reference: side-panel-api.md
+    - Manifest & Permissions: manifest-reference.md
+    - Privacy: privacy.md
+    - Removed in 1.0.4: removed-features.md
 
 markdown_extensions:
   - pymdownx.highlight

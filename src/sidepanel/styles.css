@@ -77,7 +77,7 @@ body {
   animation: pulse 2s infinite;
 }
 
-.status-indicator.running .status-dot {
+.status-indicator.busy .status-dot {
   background: var(--warning);
   animation: pulse 0.5s infinite;
 }
@@ -152,41 +152,6 @@ body {
 }
 
 /* Input Groups */
-.input-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.input-group label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-textarea, input[type="text"], input[type="url"] {
-  width: 100%;
-  padding: 10px 12px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 14px;
-  resize: vertical;
-  transition: border-color 0.2s;
-}
-
-textarea:focus, input:focus {
-  outline: none;
-  border-color: var(--primary);
-}
-
-/* Buttons */
-.button-group {
-  display: flex;
-  gap: 8px;
-}
-
 .btn {
   padding: 10px 16px;
   border: none;
@@ -206,23 +171,6 @@ textarea:focus, input:focus {
   cursor: not-allowed;
 }
 
-.btn-primary {
-  background: var(--primary);
-  color: white;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover);
-}
-
-.btn-danger {
-  background: var(--danger);
-  color: white;
-}
-
-.btn-danger:hover:not(:disabled) {
-  background: #dc2626;
-}
 
 .btn-small {
   padding: 6px 12px;
@@ -293,74 +241,7 @@ textarea:focus, input:focus {
   min-width: 0;
 }
 
-/* Agent Steps */
-.agent-steps {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.agent-steps h3 {
-  font-size: 13px;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.steps-list {
-  flex: 1;
-  background: var(--bg-secondary);
-  border-radius: var(--radius);
-  padding: 12px;
-  overflow-y: auto;
-  max-height: 300px;
-}
-
-.step-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--bg-tertiary);
-}
-
-.step-item:last-child {
-  border-bottom: none;
-}
-
-.step-icon {
-  font-size: 14px;
-}
-
-.step-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.step-action {
-  font-size: 13px;
-  color: var(--text-primary);
-}
-
-.step-reason {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.step-status {
-  font-size: 11px;
-}
-
-.step-status.success {
-  color: var(--success);
-}
-
-.step-status.failed {
-  color: var(--danger);
-}
-
-/* Tool Output */
+/* Tool output */
 .tool-output {
   display: flex;
   flex-direction: column;
@@ -382,7 +263,7 @@ textarea:focus, input:focus {
   color: var(--text-primary);
   font-family: 'Monaco', 'Menlo', monospace;
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
   max-height: 200px;
   overflow-y: auto;
 }
@@ -406,18 +287,6 @@ textarea:focus, input:focus {
   background: var(--bg-tertiary);
 }
 
-.history-goal {
-  font-size: 13px;
-  color: var(--text-primary);
-}
-
-.history-meta {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 4px;
-}
-
-/* Empty State */
 .empty-state {
   color: var(--text-muted);
   text-align: center;
@@ -431,41 +300,129 @@ textarea:focus, input:focus {
   border-top: 1px solid var(--border);
 }
 
-.ai-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-secondary);
+
+/* ---------- status ---------- */
+.status-indicator.error .status-dot {
+    background: #e5484d;
 }
 
-.ai-icon {
-  font-size: 14px;
+.tab-url.is-restricted {
+    color: #e5484d;
 }
 
-.ai-status.ready .ai-text {
-  color: var(--success);
+/* ---------- output ---------- */
+.tool-output pre.is-error {
+    color: #e5484d;
+    white-space: pre-wrap;
 }
 
-.ai-status.unavailable .ai-text {
-  color: var(--text-muted);
+.screenshot-result {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+.screenshot-result img {
+    max-width: 100%;
+    border: 1px solid rgba(127, 127, 127, 0.35);
+    border-radius: 4px;
 }
 
-::-webkit-scrollbar-track {
-  background: var(--bg-secondary);
+.tool-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
+.tool-btn:disabled:hover {
+    background: var(--bg-secondary);
+    border-color: var(--border);
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+.screenshot-result .btn-small {
+    align-self: flex-start;
+    text-decoration: none;
+    text-align: center;
+}
+
+/* ---------- history ---------- */
+.history-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding: 8px 0;
+}
+
+.history-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 10px;
+    align-items: baseline;
+}
+
+.history-action {
+    font-weight: 600;
+}
+
+.history-detail {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.8;
+}
+
+.history-time {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.6;
+    font-size: 11px;
+}
+
+/* ---------- footer ---------- */
+.footer-note {
+    font-size: 11px;
+    opacity: 0.7;
+}
+
+/* An author `display` declaration outranks the user-agent [hidden] rule, so
+   any element the panel hides needs this to actually disappear. */
+[hidden] {
+    display: none !important;
+}
+
+/* ---------- form controls ---------- */
+/* Restores the dark-theme input styling that was lost when the agent-mode
+   rules were stripped; without it these render as white system boxes. */
+input[type="text"],
+input[type="url"],
+textarea {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 14px;
+    font-family: inherit;
+}
+
+input[type="text"]::placeholder,
+input[type="url"]::placeholder,
+textarea::placeholder {
+    color: var(--text-secondary, #94a3b8);
+}
+
+input[type="text"]:focus,
+input[type="url"]:focus,
+textarea:focus {
+    border-color: var(--primary, #6366f1);
+}
+
+.input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.input-row input {
+    flex: 1;
+    min-width: 0;
 }

@@ -1,93 +1,49 @@
-# Screenshots & Recording
+# Screenshots
 
-Capture page state for AI vision analysis and record browser sessions as video.
+The extension captures the **visible viewport** of the active tab as a PNG,
+using the CDP command `Page.captureScreenshot` with
+`captureBeyondViewport: false`.
 
-## Screenshots
+## Three ways to capture
 
-### Purpose
+- Click **📸 Screenshot** in the panel
+- Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> / <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>
+- Right-click the page — or a link, an image or a text selection — and choose
+  **Capture screenshot**
 
-Screenshots enable vision-capable AI models to:
-- Understand the current page layout
-- Identify interactive elements
-- Make informed decisions about next actions
+## What happens to the image
 
-### Taking Screenshots
+The image is returned to the panel as a `data:image/png;base64,…` URL and
+displayed there, with a **Save image** link underneath.
 
-**Via CLI:**
-```bash
-# Save screenshot to file
-praisonai browser screenshot -o page.png
+!!! note "Nothing is saved to disk automatically"
+    The extension does not have the `downloads` permission and never writes a
+    file on its own. The image is shown in the panel; clicking **Save image**
+    is what puts it on disk, through Chrome's normal download flow. Chrome
+    notifications from the shortcut and the context menu say
+    *"Open the PraisonAI panel to view and save it"* for exactly this reason.
 
-# Get screenshot as base64
-praisonai browser screenshot --base64
-```
+The most recent capture is also kept in `chrome.storage.session` under
+`lastScreenshot`, together with the time it was taken, so a screenshot taken
+with the keyboard shortcut or the context menu while the panel was closed is
+shown the next time you open the panel.
 
-**Via Extension:**
-Screenshots are automatically captured during Agent mode for AI analysis.
+The panel only restores it if it is **less than five minutes old** — old enough
+to still be the shot you just took, and no older. A stale capture is left alone
+and the Output box shows its normal placeholder instead. Session storage itself
+is cleared when Chrome closes.
 
-### How It Works
+## Limits
 
-```
-┌─────────────────┐
-│  Current Tab    │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  chrome.tabs    │  Capture visible tab
-│  .captureVisibleTab()
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Base64 PNG     │  Send to vision LLM
-└─────────────────┘
-```
+- Visible viewport only. There is no full-page stitching and no scrolling
+  capture.
+- PNG only.
+- Restricted pages (`chrome://`, extension pages, the Chrome Web Store) cannot
+  be captured, because the debugger cannot attach there.
+- Capturing attaches the debugger, so Chrome's debugging banner appears. Use
+  **End Session** when you are done.
 
-## Video Recording
+## Not included
 
-### Features
-
-- Record browser sessions as video
-- Capture automation workflows
-- Perfect for documentation and debugging
-
-### Architecture
-
-Video recording uses an offscreen document for canvas operations:
-
-```
-┌─────────────────┐
-│  Offscreen Doc  │  offscreen/index.ts
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  MediaRecorder  │  Capture frames
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Video File     │  WebM output
-└─────────────────┘
-```
-
-### Permissions
-
-| Permission | Purpose |
-|------------|---------|
-| `offscreen` | Create offscreen document for video recording |
-| `activeTab` | Access current tab for screenshots |
-
-## Data Extraction
-
-Extract structured data from pages using screenshots:
-
-1. Take screenshot of data table/content
-2. Vision AI identifies structure
-3. Returns structured JSON data
-
-**Example:**
-```bash
-praisonai browser run "Extract all product prices from this page" --output json
-```
+The extension captures no video and keeps no ongoing recording of your
+browsing. A capture happens only when you explicitly ask for one.

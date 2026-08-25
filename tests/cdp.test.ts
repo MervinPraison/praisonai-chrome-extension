@@ -53,7 +53,7 @@ globalThis.DOMRect = class DOMRect {
 };
 
 // Import after mocking
-import { CDPClient, createCDPClient } from '../src/cdp/client';
+import { CDPClient } from '../src/cdp/client';
 
 describe('CDPClient', () => {
     beforeEach(() => {
@@ -139,7 +139,10 @@ describe('CDPClient', () => {
             const client = new CDPClient(123);
             await client.attach();
 
-            mockChrome.debugger.sendCommand.mockResolvedValueOnce({ frameId: 'frame-1' });
+            mockChrome.debugger.sendCommand
+                .mockResolvedValueOnce({ frameId: 'frame-1' })
+                // navigate() then waits for the document to finish loading
+                .mockResolvedValue({ result: { value: 'complete' } });
             const result = await client.navigate('https://google.com');
 
             expect(result.success).toBe(true);
@@ -221,22 +224,16 @@ describe('CDPClient', () => {
     });
 
     describe('type', () => {
-        it('should dispatch key events for each character', async () => {
+        it('should insert the text in a single CDP call', async () => {
             const client = new CDPClient(123);
             await client.attach();
 
             await client.type('ab');
 
-            // Check keyDown and keyUp for 'a'
             expect(mockChrome.debugger.sendCommand).toHaveBeenCalledWith(
                 { tabId: 123 },
-                'Input.dispatchKeyEvent',
-                expect.objectContaining({ type: 'keyDown', text: 'a' })
-            );
-            expect(mockChrome.debugger.sendCommand).toHaveBeenCalledWith(
-                { tabId: 123 },
-                'Input.dispatchKeyEvent',
-                expect.objectContaining({ type: 'keyUp', text: 'a' })
+                'Input.insertText',
+                { text: 'ab' }
             );
         });
     });
@@ -272,48 +269,92 @@ describe('CDPClient', () => {
         });
     });
 
-    describe('getPageState', () => {
-        it('should return page URL, title, and document node', async () => {
+
+    // ---- regressions found during the v1.0.4 store-compliance review ----
+
+    describe('regressions', () => {
+        it('escapes single-quoted attribute selectors without breaking the literal', async () => {
             const client = new CDPClient(123);
             await client.attach();
 
+            // Previously `input[name='q']` produced `input[name=\\'q\\']`,
+            // which ended the JS string early and threw a SyntaxError, so
+            // Click and Type both failed on the most common selector shape.
+            mockChrome.debugger.sendCommand.mockResolvedValue({
+                result: { value: { found: false } },
+            });
+            await client.clickElement("input[name='q']");
+
+            const expressions = mockChrome.debugger.sendCommand.mock.calls
+                .filter((call: unknown[]) => call[1] === 'Runtime.evaluate')
+                .map((call: unknown[]) => (call[2] as { expression: string }).expression);
+
+            expect(expressions.length).toBeGreaterThan(0);
+            for (const expression of expressions) {
+                expect(expression).toContain("input[name=\\'q\\']");
+                expect(expression).not.toContain("\\\\'q");
+            }
+        });
+
+        it('reports a failed navigation instead of claiming success', async () => {
+            const client = new CDPClient(123);
+            await client.attach();
+
+            // Page.navigate resolves successfully and reports the failure in
+            // errorText; the old code returned success regardless.
             mockChrome.debugger.sendCommand.mockResolvedValueOnce({
-                root: { nodeId: 1 },
+                frameId: 'frame-1',
+                errorText: 'net::ERR_NAME_NOT_RESOLVED',
             });
 
-            const result = await client.getPageState();
+            const result = await client.navigate('https://nope.invalid');
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('ERR_NAME_NOT_RESOLVED');
+        });
+
+        it('surfaces the real message for a thrown exception', async () => {
+            const client = new CDPClient(123);
+            await client.attach();
+
+            // exceptionDetails.text is literally "Uncaught"; the useful text
+            // is on exception.description.
+            mockChrome.debugger.sendCommand.mockResolvedValueOnce({
+                result: { value: null },
+                exceptionDetails: {
+                    text: 'Uncaught',
+                    exception: { description: 'ReferenceError: nope is not defined' },
+                },
+            });
+
+            const result = await client.evaluate('nope');
+
+            expect(result.success).toBe(false);
+            expect(result.error).toBe('ReferenceError: nope is not defined');
+        });
+
+        it('does not throw when a CDP response has no result object', async () => {
+            const client = new CDPClient(123);
+            await client.attach();
+
+            mockChrome.debugger.sendCommand.mockResolvedValueOnce({});
+
+            const result = await client.evaluate('1');
 
             expect(result.success).toBe(true);
-            expect(result.data).toEqual({
-                url: 'https://example.com',
-                title: 'Example',
-                documentNodeId: 1,
-            });
+            expect(result.data).toBeUndefined();
+        });
+
+        it('reports failure when the scroll command fails', async () => {
+            const client = new CDPClient(123);
+            await client.attach();
+
+            mockChrome.debugger.sendCommand.mockRejectedValueOnce(new Error('Detached'));
+
+            const result = await client.scroll(0, 500);
+
+            expect(result.success).toBe(false);
         });
     });
-});
 
-describe('createCDPClient', () => {
-    beforeEach(() => {
-        vi.clearAllMocks();
-        mockChrome.debugger.attach.mockResolvedValue(undefined);
-        mockChrome.debugger.sendCommand.mockResolvedValue({});
-    });
-
-    it('should create and attach client', async () => {
-        const result = await createCDPClient(123);
-
-        expect(result.success).toBe(true);
-        expect(result.data).toBeInstanceOf(CDPClient);
-        expect(result.data?.isAttached()).toBe(true);
-    });
-
-    it('should return error on failure', async () => {
-        mockChrome.debugger.attach.mockRejectedValue(new Error('Not allowed'));
-
-        const result = await createCDPClient(123);
-
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('Not allowed');
-    });
 });

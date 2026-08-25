@@ -12,7 +12,7 @@
     <header class="header">
       <div class="logo">
         <img src="icons/icon32.png" alt="PraisonAI" width="24" height="24">
-        <h1>PraisonAI</h1>
+        <h1>PraisonAI Agent</h1>
       </div>
       <div class="status-indicator" id="status-indicator">
         <span class="status-dot"></span>
@@ -27,25 +27,59 @@
 
     <!-- Mode Tabs -->
     <nav class="mode-tabs">
-      <button class="mode-tab active" data-mode="tools">🛠️ Tools</button>
+      <button class="mode-tab active" data-mode="agent">🤖 Agent</button>
+      <button class="mode-tab" data-mode="tools">🛠️ Tools</button>
       <button class="mode-tab" data-mode="history">📜 History</button>
     </nav>
 
+    <!-- Agent Mode -->
+    <section class="mode-content active" id="mode-agent">
+      <div class="input-group">
+        <label for="goal-input">What would you like me to do?</label>
+        <textarea 
+          id="goal-input" 
+          placeholder="e.g., Go to google.com and search for 'AI agents', then click the first result"
+          rows="3"
+        ></textarea>
+      </div>
+      
+      <div class="button-group">
+        <button class="btn btn-primary" id="start-agent">▶ Start Agent</button>
+        <button class="btn btn-danger" id="stop-agent" disabled>⏹ Stop</button>
+      </div>
+
+      <!-- Agent Steps -->
+      <div class="agent-steps" id="agent-steps">
+        <h3>Agent Activity</h3>
+        <div class="steps-list" id="steps-list">
+          <p class="empty-state">No activity yet. Enter a goal and click Start.</p>
+        </div>
+      </div>
+    </section>
+
     <!-- Tools Mode -->
-    <section class="mode-content active" id="mode-tools">
+    <section class="mode-content" id="mode-tools">
       <div class="tool-grid">
-        <button class="tool-btn" data-action="screenshot">📸 Screenshot</button>
-        <button class="tool-btn" data-action="extract">📋 Extract Data</button>
-        <button class="tool-btn" data-action="console">💻 Console Logs</button>
-        <button class="tool-btn" data-action="detach">⏏ End Session</button>
+        <button class="tool-btn" data-action="screenshot">
+          📸 Screenshot
+        </button>
+        <button class="tool-btn" data-action="summarize">
+          📝 Summarize
+        </button>
+        <button class="tool-btn" data-action="extract">
+          📋 Extract Data
+        </button>
+        <button class="tool-btn" data-action="console">
+          💻 Console Logs
+        </button>
       </div>
 
       <!-- Quick Actions -->
       <div class="quick-actions">
-        <h3>Actions</h3>
-
+        <h3>Quick Actions</h3>
+        
         <div class="action-group">
-          <label for="nav-url">Navigate to URL</label>
+          <label>Navigate to URL</label>
           <div class="input-row">
             <input type="url" id="nav-url" placeholder="https://example.com">
             <button class="btn btn-small" id="nav-go">Go</button>
@@ -53,15 +87,15 @@
         </div>
 
         <div class="action-group">
-          <label for="click-selector">Click Element</label>
+          <label>Click Element</label>
           <div class="input-row">
-            <input type="text" id="click-selector" placeholder="CSS selector, e.g. #submit-btn">
+            <input type="text" id="click-selector" placeholder="CSS selector, e.g., #submit-btn">
             <button class="btn btn-small" id="click-go">Click</button>
           </div>
         </div>
 
         <div class="action-group">
-          <label for="type-selector">Type Text</label>
+          <label>Type Text</label>
           <div class="input-row">
             <input type="text" id="type-selector" placeholder="Selector">
             <input type="text" id="type-text" placeholder="Text to type">
@@ -70,18 +104,10 @@
         </div>
 
         <div class="action-group">
-          <label for="eval-code">Run JavaScript</label>
+          <label>Run JavaScript</label>
           <div class="input-row">
             <input type="text" id="eval-code" placeholder="document.title">
             <button class="btn btn-small" id="eval-go">Run</button>
-          </div>
-        </div>
-
-        <div class="action-group">
-          <label>Scroll Page</label>
-          <div class="input-row">
-            <button class="btn btn-small" id="scroll-up">↑ Up</button>
-            <button class="btn btn-small" id="scroll-down">↓ Down</button>
           </div>
         </div>
       </div>
@@ -89,19 +115,12 @@
       <!-- Tool Output -->
       <div class="tool-output" id="tool-output">
         <h3>Output</h3>
-        <pre id="output-content">Run an action to see its result here.</pre>
-        <div class="screenshot-result" id="screenshot-result" hidden>
-          <img id="screenshot-img" alt="Captured screenshot">
-          <a class="btn btn-small" id="screenshot-save" download="screenshot.png">Save image</a>
-        </div>
+        <pre id="output-content">No output yet</pre>
       </div>
     </section>
 
     <!-- History Mode -->
     <section class="mode-content" id="mode-history">
-      <div class="history-actions">
-        <button class="btn btn-small" id="clear-history">Clear history</button>
-      </div>
       <div class="history-list" id="history-list">
         <p class="empty-state">No history yet</p>
       </div>
@@ -109,7 +128,10 @@
 
     <!-- Footer -->
     <footer class="footer">
-      <span class="footer-note" id="footer-note">Runs locally in your browser. Nothing is sent anywhere.</span>
+      <div class="ai-status" id="ai-status">
+        <span class="ai-icon">🧠</span>
+        <span class="ai-text">Checking AI...</span>
+      </div>
     </footer>
   </div>
 

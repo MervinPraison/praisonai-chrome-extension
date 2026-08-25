@@ -16,20 +16,13 @@ export interface CDPResult<T = unknown> {
     error?: string;
 }
 
-export interface ElementInfo {
-    nodeId: number;
-    backendNodeId: number;
-    selector: string;
-    tagName: string;
-    text: string;
-    rect: DOMRect | null;
-    attributes: Record<string, string>;
-}
-
-export interface PageState {
-    url: string;
-    title: string;
-    documentNodeId: number;
+/**
+ * Escape a selector for embedding inside a single-quoted JS string literal.
+ *
+ * Order matters: backslashes must be doubled before quotes are escaped.
+ */
+function jsString(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 /**
@@ -58,10 +51,13 @@ export class CDPClient {
             this.attached = true;
 
             // Enable required CDP domains
+            // Only the domains the shipped tools actually need.
+            // Log + Runtime are what make the Console Logs tool work; without
+            // Log.enable no `Log.entryAdded` event is ever emitted.
             await this.send('DOM.enable');
             await this.send('Page.enable');
             await this.send('Runtime.enable');
-            await this.send('Network.enable');
+            await this.send('Log.enable');
 
             return { success: true };
         } catch (error) {
@@ -122,29 +118,37 @@ export class CDPClient {
      * Navigate to URL
      */
     async navigate(url: string): Promise<CDPResult<{ frameId: string }>> {
-        return this.send<{ frameId: string }>('Page.navigate', { url });
+        const result = await this.send<{ frameId: string; errorText?: string }>(
+            'Page.navigate',
+            { url }
+        );
+        if (!result.success) {
+            return result;
+        }
+        // Page.navigate resolves successfully even when the load failed - the
+        // reason arrives as errorText, e.g. net::ERR_NAME_NOT_RESOLVED.
+        if (result.data?.errorText) {
+            return { success: false, error: result.data.errorText };
+        }
+        await this.waitForLoad();
+        return result;
     }
 
     /**
-     * Get page state (URL, title, root node)
+     * Wait until the document has finished loading, so a follow-up click acts
+     * on the new page rather than the old one.
      */
-    async getPageState(): Promise<CDPResult<PageState>> {
-        const docResult = await this.send<{ root: { nodeId: number } }>('DOM.getDocument');
-        if (!docResult.success || !docResult.data) {
-            return { success: false, error: docResult.error };
+    private async waitForLoad(timeoutMs = 10000): Promise<void> {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            const state = await this.evaluate<string>('document.readyState');
+            if (state.success && state.data === 'complete') {
+                return;
+            }
         }
-
-        const tab = await chrome.tabs.get(this.tabId);
-
-        return {
-            success: true,
-            data: {
-                url: tab.url || '',
-                title: tab.title || '',
-                documentNodeId: docResult.data.root.nodeId,
-            },
-        };
     }
+
 
     /**
      * Capture screenshot as base64
@@ -164,17 +168,24 @@ export class CDPClient {
      * Click at coordinates
      */
     async click(x: number, y: number): Promise<CDPResult<void>> {
+        // Hover first - many sites only wire up handlers after a mousemove.
+        await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+
         // Mouse down
-        await this.send('Input.dispatchMouseEvent', {
+        const down = await this.send('Input.dispatchMouseEvent', {
             type: 'mousePressed',
             x,
             y,
             button: 'left',
+            buttons: 1,
             clickCount: 1,
         });
+        if (!down.success) {
+            return { success: false, error: down.error };
+        }
 
         // Mouse up
-        await this.send('Input.dispatchMouseEvent', {
+        const up = await this.send('Input.dispatchMouseEvent', {
             type: 'mouseReleased',
             x,
             y,
@@ -182,7 +193,7 @@ export class CDPClient {
             clickCount: 1,
         });
 
-        return { success: true };
+        return up.success ? { success: true } : { success: false, error: up.error };
     }
 
     /**
@@ -196,9 +207,9 @@ export class CDPClient {
         // *** FIX: Validate and sanitize selector ***
         // Check for invalid jQuery-style selectors
         const isInvalidSelector = (sel: string): boolean => {
+            // :has() is standard CSS and querySelector supports it, so it is
+            // deliberately not listed here.
             return sel.includes(':contains(') ||
-                sel.includes(':has(') ||
-                sel.includes(':not(') && sel.includes(':contains') ||
                 sel.startsWith('$') ||
                 sel.includes('$(');
         };
@@ -212,7 +223,6 @@ export class CDPClient {
         // *** FIX: Handle invalid selectors with text fallback ***
         if (isInvalidSelector(selector)) {
             const searchText = extractContainsText(selector);
-            console.log(`[CDP] Invalid selector detected: ${selector}, trying text search: "${searchText}"`);
 
             if (searchText) {
                 // Find element by visible text
@@ -251,7 +261,10 @@ export class CDPClient {
             return { success: false, error: `Invalid selector (jQuery-style not supported): ${selector}` };
         }
 
-        const escapedSelector = selector.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
+        // Backslashes first: escaping quotes first would then double the
+        // backslash we just added, leaving a live quote that ends the string
+        // literal. `input[name='q']` used to become a SyntaxError.
+        const escapedSelector = jsString(selector);
 
         // Method 1: Scroll into view and click at viewport coordinates
         if (method === 'auto') {
@@ -282,7 +295,6 @@ export class CDPClient {
 
         // Method 2: JavaScript click() - works when mouse events fail
         if (method === 'auto' || method === 'js') {
-            console.log('[CDP] Trying JavaScript click fallback');
             const jsResult = await this.evaluate(`
                 (function() {
                     const elem = document.querySelector('${escapedSelector}');
@@ -298,7 +310,6 @@ export class CDPClient {
 
         // Method 3: Focus + Enter - works for buttons and links
         if (method === 'auto' || method === 'focus') {
-            console.log('[CDP] Trying focus + Enter fallback');
             const focusResult = await this.evaluate(`
                 (function() {
                     const elem = document.querySelector('${escapedSelector}');
@@ -325,26 +336,19 @@ export class CDPClient {
      * Previous approach sent 'text' in both keyDown and keyUp which caused double-typing.
      */
     async type(text: string): Promise<CDPResult<void>> {
-        // *** DEBUG: Log exactly what text is being typed ***
-        console.log(`[CDP] type() called with text: "${text}" (${text.length} chars)`);
 
         // Use Input.insertText for reliable text insertion
         // This is the recommended approach for typing text
-        await this.send('Input.insertText', { text });
-        console.log(`[CDP] type() completed for: "${text}"`);
-        return { success: true };
+        return this.send<void>('Input.insertText', { text });
     }
 
     /**
      * Type into element (clears existing content first)
      */
     async typeInElement(selector: string, text: string): Promise<CDPResult<void>> {
-        // *** DEBUG: Log element and text ***
-        console.log(`[CDP] typeInElement() called - selector: "${selector}", text: "${text}"`);
 
         const clickResult = await this.clickElement(selector);
         if (!clickResult.success) {
-            console.log(`[CDP] typeInElement() - click failed for: ${selector}`);
             return clickResult;
         }
 
@@ -354,7 +358,7 @@ export class CDPClient {
         // TRIPLE-CLEAR APPROACH (robust for all platforms):
         // 1. Clear via JavaScript directly (most reliable)
         try {
-            const escapedSelector = selector.replace(/'/g, "\\'");
+            const escapedSelector = jsString(selector);
             await this.send('Runtime.evaluate', {
                 expression: `
                     (function() {
@@ -367,14 +371,12 @@ export class CDPClient {
                     })()
                 `,
             });
-            console.log(`[CDP] typeInElement() - cleared via JavaScript`);
-        } catch (e) {
-            console.log(`[CDP] typeInElement() - JS clear failed, falling back to keyboard`);
+        } catch {
+            // Fall through to the keyboard clear below.
         }
 
         // 2. Also try keyboard Select-All + Delete (backup)
         // Try BOTH Cmd+A (macOS modifier=4) and Ctrl+A (Windows modifier=2)
-        console.log(`[CDP] typeInElement() - sending Cmd+A (modifier=4) to clear`);
         await this.send('Input.dispatchKeyEvent', {
             type: 'keyDown',
             key: 'a',
@@ -416,273 +418,73 @@ export class CDPClient {
 
         // Verify text was cleared
         try {
-            const verifyResult = await this.send('Runtime.evaluate', {
-                expression: `document.querySelector('${selector.replace(/'/g, "\\'")}')?.value || ''`,
-            });
-            const currentValue = (verifyResult as any)?.result?.value || '';
+            const verifyResult = await this.send<{ result: { value: string } }>(
+                'Runtime.evaluate',
+                {
+                    expression: `document.querySelector('${jsString(selector)}')?.value || ''`,
+                }
+            );
+            // send() wraps the CDP payload in { success, data } - reading
+            // `.result` directly (as an earlier `as any` cast did) always
+            // yielded undefined, so this check never actually fired.
+            const currentValue = verifyResult.data?.result?.value || '';
             if (currentValue) {
-                console.log(`[CDP] typeInElement() - WARNING: Input still has value="${currentValue}", attempting force clear`);
                 // Force clear if still has content
                 await this.send('Runtime.evaluate', {
-                    expression: `document.querySelector('${selector.replace(/'/g, "\\'")}').value = '';`,
+                    expression: `document.querySelector('${jsString(selector)}').value = '';`,
                 });
-            } else {
-                console.log(`[CDP] typeInElement() - Input cleared successfully`);
             }
-        } catch (e) {
+        } catch {
             // Ignore verification errors - some elements don't have .value
         }
 
         // Now type the new text
-        return this.type(text);
+        const typed = await this.type(text);
+        if (!typed.success) {
+            return typed;
+        }
 
+        // Confirm the text actually landed. Input.insertText succeeds at the
+        // protocol level even when the focused node accepts no text, so
+        // without this the panel would report a success that never happened.
+        const check = await this.evaluate<{ ok: boolean; kind: string }>(`
+            (function () {
+                var el = document.querySelector('${jsString(selector)}');
+                if (!el) return { ok: false, kind: 'missing' };
+                var current = ('value' in el) ? el.value : el.textContent;
+                return {
+                    ok: String(current || '').indexOf(${JSON.stringify(text)}) !== -1,
+                    kind: el.tagName.toLowerCase()
+                };
+            })()
+        `);
+
+        if (check.success && check.data && !check.data.ok) {
+            return {
+                success: false,
+                error:
+                    `Text was not accepted by <${check.data.kind}> "${selector}". ` +
+                    'Check that the selector points at an input, textarea or editable element.',
+            };
+        }
+
+        return { success: true };
     }
 
     /**
      * Scroll page
      */
     async scroll(deltaX: number, deltaY: number): Promise<CDPResult<void>> {
-        await this.send('Input.dispatchMouseEvent', {
+        return this.send<void>('Input.dispatchMouseEvent', {
             type: 'mouseWheel',
             x: 100,
             y: 100,
             deltaX,
             deltaY,
         });
-        return { success: true };
     }
 
-    /**
-     * Find element by selector
-     */
-    async findElement(selector: string): Promise<CDPResult<ElementInfo>> {
-        // Get document
-        const docResult = await this.send<{ root: { nodeId: number } }>('DOM.getDocument');
-        if (!docResult.success || !docResult.data) {
-            return { success: false, error: docResult.error };
-        }
 
-        // Query selector
-        const queryResult = await this.send<{ nodeId: number }>('DOM.querySelector', {
-            nodeId: docResult.data.root.nodeId,
-            selector,
-        });
-
-        if (!queryResult.success || !queryResult.data || queryResult.data.nodeId === 0) {
-            return { success: false, error: `Element not found: ${selector}` };
-        }
-
-        const nodeId = queryResult.data.nodeId;
-
-        // Get node details
-        const nodeResult = await this.send<{
-            node: {
-                nodeId: number;
-                backendNodeId: number;
-                nodeName: string;
-                attributes?: string[];
-            };
-        }>('DOM.describeNode', { nodeId });
-
-        if (!nodeResult.success || !nodeResult.data) {
-            return { success: false, error: nodeResult.error };
-        }
-
-        // Get bounding box
-        const boxResult = await this.send<{
-            model: {
-                content: number[];
-                width: number;
-                height: number;
-            };
-        }>('DOM.getBoxModel', { nodeId });
-
-        let rect: DOMRect | null = null;
-        if (boxResult.success && boxResult.data) {
-            const content = boxResult.data.model.content;
-            rect = new DOMRect(
-                content[0],
-                content[1],
-                boxResult.data.model.width,
-                boxResult.data.model.height
-            );
-        }
-
-        // Parse attributes
-        const attributes: Record<string, string> = {};
-        const attrList = nodeResult.data.node.attributes || [];
-        for (let i = 0; i < attrList.length; i += 2) {
-            attributes[attrList[i]] = attrList[i + 1];
-        }
-
-        // Get text content
-        const textResult = await this.send<{ outerHTML: string }>('DOM.getOuterHTML', { nodeId });
-
-        return {
-            success: true,
-            data: {
-                nodeId,
-                backendNodeId: nodeResult.data.node.backendNodeId,
-                selector,
-                tagName: nodeResult.data.node.nodeName.toLowerCase(),
-                text: textResult.data?.outerHTML?.slice(0, 200) || '',
-                rect,
-                attributes,
-            },
-        };
-    }
-
-    /**
-     * Get all interactive elements on page (for browser automation)
-     */
-    async getClickableElements(): Promise<CDPResult<ElementInfo[]>> {
-        const docResult = await this.send<{ root: { nodeId: number } }>('DOM.getDocument');
-        if (!docResult.success || !docResult.data) {
-            return { success: false, error: docResult.error };
-        }
-
-        // Query for all interactive elements including inputs
-        const selectors = [
-            'input:not([type="hidden"])',  // Text inputs, search, etc.
-            'textarea',
-            'select',
-            '[contenteditable="true"]',
-            'a[href]',
-            'button',
-            'input[type="button"]',
-            'input[type="submit"]',
-            '[onclick]',
-            '[role="button"]',
-            '[role="link"]',
-            '[role="textbox"]',
-        ];
-
-        const elements: ElementInfo[] = [];
-        const seenNodeIds = new Set<number>();
-        let elementIndex = 0;
-
-        for (const selector of selectors) {
-            try {
-                const queryResult = await this.send<{ nodeIds: number[] }>(
-                    'DOM.querySelectorAll',
-                    {
-                        nodeId: docResult.data.root.nodeId,
-                        selector,
-                    }
-                );
-
-                if (!queryResult.success || !queryResult.data) continue;
-
-                for (const nodeId of queryResult.data.nodeIds) {
-                    // Skip if already seen (element may match multiple selectors)
-                    if (seenNodeIds.has(nodeId)) continue;
-                    seenNodeIds.add(nodeId);
-
-                    // Limit total elements
-                    if (elements.length >= 30) break;
-
-                    try {
-                        // Get node details directly using nodeId
-                        const nodeResult = await this.send<{
-                            node: {
-                                nodeId: number;
-                                backendNodeId: number;
-                                nodeName: string;
-                                attributes?: string[];
-                            };
-                        }>('DOM.describeNode', { nodeId });
-
-                        if (!nodeResult.success || !nodeResult.data) continue;
-
-                        // Get bounding box
-                        const boxResult = await this.send<{
-                            model: {
-                                content: number[];
-                                width: number;
-                                height: number;
-                            };
-                        }>('DOM.getBoxModel', { nodeId });
-
-                        let rect: DOMRect | null = null;
-                        if (boxResult.success && boxResult.data) {
-                            const content = boxResult.data.model.content;
-                            rect = new DOMRect(
-                                content[0],
-                                content[1],
-                                boxResult.data.model.width,
-                                boxResult.data.model.height
-                            );
-                        }
-
-                        // Skip elements not visible (zero size or off-screen)
-                        if (!rect || rect.width === 0 || rect.height === 0) continue;
-                        if (rect.x < 0 || rect.y < 0 || rect.x > 2000 || rect.y > 2000) continue;
-
-                        // Parse attributes
-                        const attributes: Record<string, string> = {};
-                        const attrList = nodeResult.data.node.attributes || [];
-                        for (let i = 0; i < attrList.length; i += 2) {
-                            attributes[attrList[i]] = attrList[i + 1];
-                        }
-
-                        // Build a usable selector
-                        const tagName = nodeResult.data.node.nodeName.toLowerCase();
-                        let bestSelector = tagName;
-
-                        if (attributes['id']) {
-                            bestSelector = `#${attributes['id']}`;
-                        } else if (attributes['name']) {
-                            bestSelector = `${tagName}[name="${attributes['name']}"]`;
-                        } else if (attributes['data-testid']) {
-                            bestSelector = `[data-testid="${attributes['data-testid']}"]`;
-                        } else if (attributes['aria-label']) {
-                            bestSelector = `[aria-label="${attributes['aria-label']}"]`;
-                        } else if (attributes['class']) {
-                            const firstClass = attributes['class'].split(' ')[0];
-                            if (firstClass && !firstClass.includes(':')) {
-                                bestSelector = `${tagName}.${firstClass}`;
-                            }
-                        }
-
-                        // Get text content (for display)
-                        let textContent = '';
-                        const textResult = await this.send<{ outerHTML: string }>('DOM.getOuterHTML', { nodeId });
-                        if (textResult.success && textResult.data) {
-                            // Extract visible text only
-                            const html = textResult.data.outerHTML;
-                            const textMatch = html.match(/>([^<]{1,50})</);
-                            textContent = textMatch ? textMatch[1].trim() : '';
-                            // Use placeholder/value for inputs
-                            if (!textContent && attributes['placeholder']) {
-                                textContent = attributes['placeholder'];
-                            }
-                            if (!textContent && attributes['value']) {
-                                textContent = attributes['value'];
-                            }
-                        }
-
-                        elementIndex++;
-                        elements.push({
-                            nodeId,
-                            backendNodeId: nodeResult.data.node.backendNodeId,
-                            selector: bestSelector,
-                            tagName,
-                            text: textContent.slice(0, 50),
-                            rect,
-                            attributes,
-                        });
-                    } catch {
-                        // Skip this element on error
-                    }
-                }
-            } catch {
-                // Continue with next selector
-            }
-        }
-
-        console.log(`[CDP] Found ${elements.length} interactive elements`);
-        return { success: true, data: elements };
-    }
 
     /**
      * Execute JavaScript in page context
@@ -690,7 +492,7 @@ export class CDPClient {
     async evaluate<T = unknown>(expression: string): Promise<CDPResult<T>> {
         const result = await this.send<{
             result: { value: T };
-            exceptionDetails?: { text: string };
+            exceptionDetails?: { text: string; exception?: { description?: string } };
         }>('Runtime.evaluate', {
             expression,
             returnByValue: true,
@@ -702,20 +504,21 @@ export class CDPClient {
         }
 
         if (result.data.exceptionDetails) {
-            return { success: false, error: result.data.exceptionDetails.text };
+            // exceptionDetails.text is literally "Uncaught" for a thrown
+            // error; the useful message lives on exception.description.
+            const details = result.data.exceptionDetails;
+            return { success: false, error: details.exception?.description ?? details.text };
+        }
+
+        // A malformed or empty CDP response has no `result` object; reading
+        // through it unguarded throws inside the client.
+        if (!('result' in result.data) || result.data.result === undefined) {
+            return { success: true, data: undefined as T };
         }
 
         return { success: true, data: result.data.result.value };
     }
 
-    /**
-     * Get console logs
-     */
-    async getConsoleLogs(): Promise<CDPResult<Array<{ level: string; text: string }>>> {
-        // Console logs are captured via events, not direct query
-        // This would need event listener setup
-        return { success: true, data: [] };
-    }
 
     /**
      * Check if currently attached
@@ -724,24 +527,4 @@ export class CDPClient {
         return this.attached;
     }
 
-    /**
-     * Get tab ID
-     */
-    getTabId(): number {
-        return this.tabId;
-    }
-}
-
-/**
- * Factory function to create and attach CDP client
- */
-export async function createCDPClient(tabId: number): Promise<CDPResult<CDPClient>> {
-    const client = new CDPClient(tabId);
-    const result = await client.attach();
-
-    if (!result.success) {
-        return { success: false, error: result.error };
-    }
-
-    return { success: true, data: client };
 }

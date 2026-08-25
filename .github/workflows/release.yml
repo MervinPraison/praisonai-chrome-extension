@@ -65,12 +65,15 @@ jobs:
             6. Select the unzipped folder
             
             ### Features
-            - 🤖 AI-powered browser automation
-            - 🧠 On-device Gemini Nano support
-            - 🎯 Natural language task execution
-            - 📸 Screenshot capture for AI vision
+            - 🧭 Navigate, click by CSS selector, type text and scroll
+            - ⚙️ Run a JavaScript expression in the page
+            - 📋 Extract the page title, headings, links and images as JSON
+            - 💻 Read the page's console output
+            - 📸 Capture a screenshot from the panel, a shortcut or the right-click menu
             
-            [Documentation](https://mervinpraison.github.io/praisonai-chrome-extension/)
+            Runs locally via the Chrome DevTools Protocol. No server, no account.
+            
+            [Documentation](https://chrome.praison.ai)
           files: |
             praisonai-extension.zip
           draft: false

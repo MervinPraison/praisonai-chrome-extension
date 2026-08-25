@@ -5,13 +5,11 @@ import { viteStaticCopy } from 'vite-plugin-static-copy';
 export default defineConfig({
     build: {
         outDir: 'dist',
-        emptyDirBeforeWrite: true,
+        emptyOutDir: true,
         rollupOptions: {
             input: {
                 background: resolve(__dirname, 'src/background/index.ts'),
-                content: resolve(__dirname, 'src/content/index.ts'),
                 sidepanel: resolve(__dirname, 'src/sidepanel/index.ts'),
-                offscreen: resolve(__dirname, 'src/offscreen/index.ts'),
             },
             output: {
                 entryFileNames: '[name].js',
@@ -25,10 +23,7 @@ export default defineConfig({
     resolve: {
         alias: {
             '@': resolve(__dirname, 'src'),
-            '@core': resolve(__dirname, 'src/core'),
             '@cdp': resolve(__dirname, 'src/cdp'),
-            '@ai': resolve(__dirname, 'src/ai'),
-            '@ui': resolve(__dirname, 'src/ui'),
         },
     },
     plugins: [
@@ -36,7 +31,6 @@ export default defineConfig({
             targets: [
                 { src: 'manifest.json', dest: '.' },
                 { src: 'src/sidepanel/sidepanel.html', dest: '.' },
-                { src: 'src/offscreen/offscreen.html', dest: '.' },
                 { src: 'icons/*', dest: 'icons' },
                 { src: 'src/sidepanel/styles.css', dest: '.' },
             ],

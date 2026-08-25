@@ -1,378 +1,448 @@
-# Chrome Web Store Listing Content
+# Chrome Web Store Listing — v1.0.4
+
+Every claim below is reproducible on a clean Chrome profile with no server, no
+model, no flags and no sign-in. If a feature is not in this document, it is not
+in the extension.
+
+---
 
 ## Store Listing Fields
 
 ### Title
+
 ```
 PraisonAI Browser Agent
 ```
 
-### Summary 
+### Summary (132 char limit)
+
 ```
-Browser automation with side panel, screenshots, and session recording. Navigate websites, click elements, fill forms using the intuitive side panel interface.
+Control any tab from a side panel: navigate, click by CSS selector, type text, run JavaScript, and capture screenshots.
 ```
+
+### Category
+
+Developer Tools
 
 ### Description
-```
-PraisonAI Browser Agent - Browser Automation Made Simple
 
-Automate your browser tasks with an intuitive side panel interface. Navigate websites, interact with page elements, capture screenshots, and record browser sessions.
+```
+PraisonAI Browser Agent — a side panel toolkit for driving web pages by hand.
+
+Open the side panel and control the active tab directly: go to a URL, click an
+element by CSS selector, type into a field, run a JavaScript expression, read the
+page's console output, pull its structure out as JSON, or capture a screenshot.
+Everything runs locally in your browser using the Chrome DevTools Protocol.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✨ KEY FEATURES
+WHAT YOU CAN DO
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🎛️ Side Panel Interface
-• Convenient side panel that stays open while browsing
-• Enter automation goals and see real-time progress
-• View history of completed actions
-• Quick access via toolbar icon or keyboard shortcut
-
-📸 Screenshot Capture
-• Capture screenshots with one click or keyboard shortcut
-• Right-click context menu for quick capture
-• Notifications confirm successful captures
-• Screenshots saved for your records
-
-🎬 Session Recording
-• Record browser sessions as video
-• Capture both video and audio from tabs
-• WebM format for easy sharing
-• Start/stop recording from side panel
-
-🖱️ Page Interaction
-• Click buttons and links on any page
-• Fill form fields automatically
-• Scroll pages up and down
-• Navigate to URLs
+• Navigate — enter a URL and load it in the current tab
+• Click — target any element with a CSS selector
+• Type — enter text into an input or textarea by selector
+• Scroll — move the page up or down
+• Run JavaScript — evaluate an expression in the page and see the result
+• Extract Data — get the page title, URL, headings, links and images as JSON
+• Console Logs — read console output and uncaught errors from the page
+• Screenshot — capture the page from the panel, a keyboard shortcut, or the
+  right-click menu, then save the image from the panel
+• End Session — detach from the tab and clear Chrome's debugging banner
+• History — the panel remembers the actions you ran, stored on your device
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎮 HOW TO USE
+HOW TO USE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. Click the PraisonAI icon in your toolbar to open side panel
-2. Or use keyboard shortcut: Ctrl+Shift+P (Cmd+Shift+P on Mac)
-3. Use the interface to control browser automation
-4. Right-click on any page for quick actions
+1. Click the PraisonAI icon in your toolbar to open the side panel
+   (or press Ctrl+Shift+P, Cmd+Shift+P on Mac, or right-click and choose
+   "Open PraisonAI panel")
+2. Fill in a URL, selector, text or expression and press the button
+3. Results appear in the Output box below
+4. Press "End Session" when you are finished with a tab
+
+The panel belongs to the window it was opened in and drives that window's
+active tab. While an action is running the buttons are disabled, so two
+actions never overlap on the same tab.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⌨️ KEYBOARD SHORTCUTS
+KEYBOARD SHORTCUTS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-• Ctrl+Shift+P / Cmd+Shift+P: Open side panel
-• Alt+A / Option+A: Start automation
-• Ctrl+Shift+S / Cmd+Shift+S: Capture screenshot
+• Ctrl+Shift+P (Cmd+Shift+P) — open the side panel
+• Ctrl+Shift+S (Cmd+Shift+S) — capture a screenshot
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 PERMISSIONS EXPLAINED
+GOOD TO KNOW
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-• Side Panel: Main user interface
-• Active Tab: Interact with current page
-• Tabs: Manage tabs during automation
-• Scripting: Execute page interactions
-• Debugger: Advanced element detection
-• Storage: Save preferences
-• Notifications: Alert on task completion
-• Offscreen: Process recordings and images
-• Tab Capture: Record browser sessions
+• Automation uses the Chrome DevTools Protocol, so Chrome shows a
+  "PraisonAI Browser Agent started debugging this browser" banner while the
+  panel is driving a tab. Press "End Session", or close the banner, to stop.
+• Chrome does not allow automation on chrome:// pages, the Chrome Web Store, or
+  other extensions' pages. The panel tells you when the current tab is off limits.
+  On a brand-new, empty tab it asks you to open a website first.
+• Console output is captured from the moment the panel connects to a tab. Reload
+  the page to capture its start-up logs. "End Session" or closing the tab clears
+  what was captured.
+• Screenshots are shown in the panel with a Save link. Nothing is written to your
+  disk unless you save it yourself.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔗 SUPPORT
+WHAT THE PERMISSION WARNING MEANS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-• Documentation: https://docs.praison.ai
-• Issues: https://github.com/MervinPraison/PraisonAI/issues
-• Website: https://praison.ai
+Chrome will warn that this extension can "Read and change all your data on all
+websites". That warning comes from the debugger permission, which is what the
+Chrome DevTools Protocol requires. It is the honest ceiling of what the
+permission allows, and we would rather explain it than let it surprise you.
 
-Made with ❤️ by PraisonAI
-```
+What the extension actually does with it:
+• It attaches to one tab at a time, and only in response to something you did:
+  a button in the panel, the screenshot shortcut, or the right-click menu
+• Chrome shows a "started debugging this browser" banner the whole time
+• Press "End Session", or close the panel, and the session ends immediately.
+  A screenshot taken by shortcut or right-click with the panel closed detaches
+  as soon as it is done, so it leaves no session behind
+• It declares no host permissions and installs no content script, so it has no
+  standing access to any site and does nothing in the background
+• It makes no network requests, so nothing it reads can go anywhere
+• Actions report what actually happened. A URL that does not resolve, a selector
+  that matches nothing, and text a field would not accept are all reported as
+  failures — never as success.
 
-### Language
-```
-English
-```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PRIVACY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
----
+• No account and no sign-in
+• No servers — the extension makes no network requests of any kind
+• No analytics and no tracking
+• Three things are stored, all locally, using Chrome storage: your action
+  history, the most recent screenshot, and the console output captured from the
+  tab you are working on. Nothing is transmitted.
+• No host permissions are declared. Chrome still shows "Read and change all your
+  data on all websites" at install, because the debugger permission implies it —
+  see "What the permission warning means" below.
 
-## URLs
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SUPPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-### Homepage URL
-```
-https://docs.praison.ai
-```
-
-### Support URL
-```
-https://github.com/MervinPraison/PraisonAI/issues
-```
-
-## Mature Content
-```
-No (uncheck)
-```
-
-## Item Support
-```
-On
-```
-
----
-
-# Privacy Practices Tab
-
-## Single Purpose Description
-```
-This extension provides browser automation tools including a side panel interface for controlling page interactions, screenshot capture via keyboard shortcuts and context menu, and session recording capabilities. Users can navigate websites, click elements, fill forms, and capture screenshots through the intuitive interface.
+• Documentation: https://chrome.praison.ai
+• Issues: https://github.com/MervinPraison/praisonai-chrome-extension/issues
 ```
 
 ---
 
 ## Permission Justifications
 
-### activeTab
-```
-Required to interact with the currently active tab when the user initiates a browser automation task. The extension reads page content (DOM elements, text, URLs) and executes actions (clicks, typing) only on the tab the user is actively working with. This is triggered only by explicit user action (clicking "Start Agent" or using keyboard shortcuts).
-```
-
-### tabs
-```
-Required to manage browser tabs during multi-step automation workflows. The extension may need to open new tabs, switch between tabs, or close tabs as part of completing user-requested tasks. For example, when searching for information that spans multiple pages or when the user's goal requires navigating to different websites.
-```
-
-### scripting
-```
-Required to execute automation scripts on web pages. The extension injects scripts to identify interactive elements (buttons, links, input fields), read page content, and perform actions (clicking, typing text) as directed by the AI agent. Scripts are only executed on pages where the user has initiated an automation task.
-```
-
-### debugger
-```
-Required for advanced element detection and interaction using Chrome DevTools Protocol (CDP). This enables precise identification of clickable elements, form fields, and interactive components on complex web pages. The debugger API provides reliable browser automation capabilities that are not possible through content scripts alone.
-```
-
-### storage
-```
-Required to save user preferences such as preferred AI model, server connection settings, and session history. All data is stored locally on the user's device using Chrome's storage API. No user data is transmitted to external servers unless the user explicitly configures a connection to the PraisonAI bridge server.
-```
+Six permissions. Each one has a call site in the shipped bundle and a control in
+the side panel that reaches it.
 
 ### sidePanel
-```
-Required to display the main user interface. The side panel provides the primary interaction point where users enter their goals, view automation progress, and see the history of completed actions. This panel remains accessible while browsing, allowing users to monitor and control automation tasks without switching windows.
-```
+
+Provides the extension's entire user interface. The side panel is where the user
+enters a URL, selector, text or JavaScript expression, triggers the Screenshot /
+Extract Data / Console Logs tools, and reviews their action history. The toolbar
+icon opens it through `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`;
+the `open-panel` keyboard command and the "Open PraisonAI panel" context-menu
+item call `chrome.sidePanel.open({ windowId })`. Verify by clicking the toolbar
+icon or pressing Ctrl+Shift+P.
+
+### tabs
+
+Required specifically to read the `url` and `title` properties of the active
+tab, which the API does not expose without it. The panel displays the URL of the
+tab it is attached to, and checks it to warn the user before attempting to
+automate a `chrome://`, Chrome Web Store or extension page, where Chrome blocks
+the DevTools Protocol. No tab data leaves the device.
+
+### debugger
+
+The Chrome DevTools Protocol is what makes this extension work at all.
+`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent` and `Input.insertText`
+generate trusted input events; events synthesised from a content script carry
+`isTrusted: false` and are ignored by most login forms, payment fields and modern
+web frameworks. `Page.navigate` drives the Navigate tool,
+`Page.captureScreenshot` captures the page image, `Runtime.evaluate` powers the
+Run JavaScript and Extract Data tools (and the verification steps that make
+Click and Type report honestly), and `Log.entryAdded`,
+`Runtime.consoleAPICalled` plus `Runtime.exceptionThrown` power the Console Logs
+tool. The debugger attaches only to a tab the user has explicitly targeted from
+the panel. End Session calls `chrome.debugger.detach` on that tab and reports
+the actual result, and Chrome also detaches when the tab is closed.
+
+### storage
+
+Three local stores, nothing transmitted anywhere.
+
+- `storage.local` — the user's recent actions, so the History tab survives
+  browser restarts (capped at 50 entries). Cleared by the "Clear history"
+  button or by uninstalling.
+- `storage.session` (`lastScreenshot`) — the most recent screenshot, so it can
+  be shown when the panel is opened after using the keyboard shortcut or the
+  context menu. The panel only displays it if it is under five minutes old.
+- `storage.session` (`console:<tabId>`) — the console output captured from the
+  tab being worked on, last 200 entries. A Manifest V3 service worker is
+  suspended after roughly 30 seconds idle, which would discard an in-memory
+  buffer and leave the Console Logs button empty; mirroring it to session
+  storage is what makes the tool work. Cleared by End Session, by closing the
+  tab, or by closing Chrome.
 
 ### contextMenus
-```
-Required to add right-click menu options for quick access to extension features. Users can right-click on page elements to quickly trigger automation actions, such as "Fill this form" or "Click this element". This provides a convenient alternative to opening the side panel for simple tasks.
-```
+
+Adds exactly two right-click entries — Capture screenshot, and Open PraisonAI
+panel — so a user can capture the current page, or reach the panel, without
+going to the toolbar first. Both are registered with `contexts: ['all']`, so
+they are available on the page background and also on links, images and
+selected text, wherever the user happens to right-click.
 
 ### notifications
-```
-Required to alert users when automation tasks complete, fail, or require attention. Notifications inform users of task completion when the browser is not in focus, ensuring they are aware of the automation status without constantly monitoring the side panel.
-```
 
-### offscreen
-```
-Required for browser session recording functionality. The offscreen document hosts MediaRecorder API to capture tab video/audio streams, process recorded video data into WebM format, and handle Base64 encoding of media files. This is necessary because MediaRecorder and Canvas APIs are not available in service workers (Manifest V3 requirement). The offscreen document is created when user initiates recording via the side panel.
-```
+Shows a desktop notification after a screenshot is captured with the
+Ctrl+Shift+S / Cmd+Shift+S shortcut or the "Capture screenshot" context-menu
+item. Both work while the side panel is closed, so without the notification the
+user gets no feedback at all. The notification says whether the capture
+succeeded and where to view it; it does not claim the file was saved. Reproduce
+it with Ctrl+Shift+S on any ordinary web page with the panel closed.
 
-### tabCapture
-```
-Required for the session recording feature. When users initiate recording from the side panel, tabCapture provides the media stream ID needed to capture video and audio from the active tab. This stream is processed by the offscreen document's MediaRecorder to create WebM video files. Also used for capturing screenshots of the current tab.
-```
+### Host permissions
 
-### alarms
-```
-Required to keep the service worker alive during long-running automation tasks. Manifest V3 service workers can be terminated after 30 seconds of inactivity. The alarms API provides periodic wake-up calls to prevent termination during multi-step automation workflows that may take several minutes to complete.
-```
+**None declared.** `chrome.debugger` requires no host permissions, and the
+extension ships no content script, so it has no standing access to any site and
+no host-permission justification box should appear for this item.
 
-### host_permissions (<all_urls>)
-```
-This is a browser automation tool that must work on any website the user chooses. Users describe goals like "search Google", "book flights", or "fill this form" - requiring the ability to interact with arbitrary websites. The extension only accesses pages when the user explicitly initiates an automation task via the side panel or keyboard shortcut.
-```
+Note for review: Chrome nonetheless surfaces "Read and change all your data on
+all websites" in the install prompt, because the `debugger` permission implies
+that capability. `chrome.permissions.getAll()` returns `origins: []`. The store
+description discloses this warning and explains it rather than claiming narrower
+access than Chrome shows the user.
 
----
+### APIs used without a permission entry
 
-## Remote Code Justification
-```
-This extension does not execute remote code. All JavaScript code is bundled within the extension package during build time. The extension may connect to:
-
-1. Local PraisonAI bridge server (localhost) - for AI agent communication
-2. AI provider APIs (OpenAI, Anthropic, Google) - for language model inference
-
-These connections transmit data for AI processing but do not download or execute code. All automation scripts are pre-bundled in the extension.
-```
+`chrome.runtime` (messaging between the panel and the service worker),
+`chrome.commands` (the two keyboard shortcuts) and `chrome.windows` need no
+declared permission. `chrome.windows.getCurrent()` is called once when the panel
+opens, so the panel knows which window it belongs to and only ever drives that
+window's active tab. The complete set of Chrome APIs in the shipped bundle is:
+`runtime`, `tabs`, `windows`, `debugger`, `storage`, `sidePanel`, `commands`,
+`contextMenus`, `notifications`.
 
 ---
 
-## Data Usage Certification
+## Single Purpose
 
-### Does this extension collect user data?
 ```
-Yes - The extension collects:
-- Page URLs and titles (to provide context to AI)
-- DOM element information (to enable automation)
-- Screenshots (for AI vision analysis, if enabled)
-- User-entered goals and preferences
-
-This data is:
-- Processed locally on the user's device, OR
-- Sent to the user-configured AI provider (OpenAI/Anthropic/Google) for processing
-- NOT sold or transferred to third parties
-- NOT used for advertising
-```
-
-### Privacy Policy URL
-```
-https://praison.ai/praisonai-browser-agent-privacy-policy/
+A side panel that lets the user drive the current browser tab — navigate, click,
+type, scroll, run JavaScript, read console output, extract page structure, and
+capture screenshots — using the Chrome DevTools Protocol, entirely on the user's
+own machine.
 ```
 
 ---
 
 ## Privacy Practices
 
-| Field | Value |
-|-------|-------|
-| Single purpose | Browser automation with side panel, screenshots, and session recording |
-| activeTab | See justification above |
-| tabs | See justification above |
-| scripting | See justification above |
-| debugger | See justification above |
-| storage | See justification above |
-| sidePanel | See justification above |
-| contextMenus | See justification above |
-| notifications | See justification above |
-| offscreen | See justification above |
-| tabCapture | See justification above |
-| alarms | See justification above |
-| host_permissions | See justification above |
-| Remote code | No remote code execution |
-| Data certification | Certify compliance |
+**Does this item collect user data?** No.
+
+| Category | Collected | Notes |
+| --- | --- | --- |
+| Personally identifiable information | No | |
+| Health information | No | |
+| Financial and payment information | No | |
+| Authentication information | No | |
+| Personal communications | No | |
+| Location | No | |
+| Web history | No | Action history is stored locally on the device and never transmitted. |
+| User activity | No | |
+| Website content | No | Page content is read only to answer an action the user just triggered, is shown back to that user, and is never transmitted. |
+
+Certifications:
+
+- [x] I do not sell or transfer user data to third parties, outside of the approved use cases
+- [x] I do not use or transfer user data for purposes that are unrelated to my item's single purpose
+- [x] I do not use or transfer user data to determine creditworthiness or for lending purposes
+
+**Remote code:** No. The extension executes no remote code. Its
+`content_security_policy` is `script-src 'self'; object-src 'self'`, it declares
+no host permissions, and it makes no network requests.
 
 ---
 
-# TESTER VERIFICATION GUIDE
+## Reviewer Verification Guide
 
-This section provides step-by-step instructions for Chrome Web Store reviewers to verify each feature and permission.
+Fresh profile, no setup of any kind required.
 
-## Quick Verification Checklist
+1. **Open the panel.** Click the toolbar icon, or press Ctrl+Shift+P
+   (Cmd+Shift+P). The side panel opens and shows the current tab's URL.
+2. **Navigate.** In "Navigate to URL" enter `example.com` and press Go.
+   *Expected:* Chrome shows the debugging banner, the tab loads example.com, and
+   the Output box reads `Navigated to https://example.com/`.
+3. **Run JavaScript.** In "Run JavaScript" enter `document.title` and press Run.
+   *Expected:* Output reads `Example Domain`.
+4. **Click.** In "Click Element" enter `a` and press Click.
+   *Expected:* Output reads `Clicked a` and the page follows the link.
+5. **Type.** Navigate to `wikipedia.org`, then in "Type Text" enter selector
+   `#searchInput` and text `chrome extension`, and press Type.
+   *Expected:* Output reads `Typed into #searchInput` and the text appears in
+   the search box. (`input[name='search']` works there too, if you prefer an
+   attribute selector.)
+6. **Extract Data.** Press "Extract Data".
+   *Expected:* Output shows JSON with the page title, URL, headings, links and
+   images.
+7. **Screenshot.** Press "Screenshot".
+   *Expected:* The captured image appears in the panel with a "Save image" link.
+8. **Screenshot by shortcut.** Close the panel and press Ctrl+Shift+S
+   (Cmd+Shift+S). *Expected:* A desktop notification titled "Screenshot
+   captured", with the body "Open the PraisonAI panel to view and save it."
+   Reopen the panel; the image is there. (If the shortcut does nothing, check
+   `chrome://extensions/shortcuts` — Chrome silently drops a suggested key that
+   collides with another extension. The Screenshot button in the panel does the
+   same thing.)
+9. **Console Logs.** Press "Console Logs".
+   *Expected:* Either the page's console output, or a message explaining that
+   capture begins when the panel connects and to reload the page. Leave the
+   browser idle for a minute so Chrome suspends the service worker, then press
+   it again — the output is still there, because it is mirrored to
+   `chrome.storage.session`.
+10. **Error handling.** Enter a selector that matches nothing, e.g. `#nope`, and
+    press Click. *Expected:* The Output box turns red with an explanatory error
+    and the status reads "Failed". The extension never reports success for an
+    action that did not happen.
+11. **Failed navigation.** In "Navigate to URL" enter a hostname that does not
+    exist, e.g. `this-host-does-not-exist.example`, and press Go.
+    *Expected:* The Output box shows the network error
+    (`net::ERR_NAME_NOT_RESOLVED`) and the status reads "Failed" — not
+    "Navigated to …".
+12. **Type into something that is not a field.** On `example.com`, in
+    "Type Text" enter selector `h1` and text `zzq-not-a-field`.
+    *Expected:* An error explaining that the text was not accepted and that the
+    selector should point at an input, textarea or editable element — not
+    "Typed into h1".
+13. **Restricted page.** Switch to a `chrome://extensions` tab.
+    *Expected:* The panel marks the tab as one Chrome blocks automation on, and
+    any action returns that explanation rather than failing silently.
+14. **Empty tab.** Open a brand-new tab (Chrome's New Tab Page) and run any
+    action. *Expected:* "Open a website in this tab first, then try again."
+    A plain `about:blank` tab is different and *can* be automated — entering a
+    URL and pressing Go navigates it normally.
+15. **Right-click menu.** Right-click the page, then right-click a link and an
+    image. *Expected:* "Capture screenshot" and "Open PraisonAI panel" appear in
+    all three cases — the items are registered with `contexts: ['all']`.
+16. **History.** Open the History tab.
+    *Expected:* The successful actions from the steps above are listed with
+    timestamps. Console Logs and End Session are deliberately not recorded;
+    they are not page actions.
+17. **End Session.** Press "End Session".
+    *Expected:* The debugging banner disappears. The button calls
+    `chrome.debugger.detach` on the tab directly, so it also works after Chrome
+    has suspended the service worker and thrown away its in-memory session map —
+    which is exactly the case where a banner used to be left stranded.
 
-| Feature | How to Verify | Expected Result |
-|---------|---------------|-----------------|
-| Side Panel | Click toolbar icon | Side panel opens on right side |
-| Screenshot | Press Ctrl+Shift+S | Notification appears "Screenshot Captured" |
-| Context Menu | Right-click any page | "PraisonAI" menu with options appears |
-| Keyboard Shortcuts | Press Ctrl+Shift+P | Side panel toggles open/closed |
-| Storage | Open side panel, change settings | Settings persist after browser restart |
+---
 
-## Detailed Verification Steps
+## Changes in v1.0.4
 
-### 1. SIDE PANEL (sidePanel permission)
-**Steps:**
-1. Install the extension
-2. Click the PraisonAI icon in the Chrome toolbar
-3. The side panel should open on the right side of the browser
+Submitted in response to violation reference IDs **Red Potassium** (Inaccurate
+Description — Non functional) and **Purple Potassium** (Use of permissions).
 
-**Expected:** Side panel displays with PraisonAI interface showing input field and controls.
+**Permissions reduced from eleven to six.**
 
-### 2. SCREENSHOT CAPTURE (activeTab, tabCapture, notifications permissions)
-**Steps:**
-1. Navigate to any website (e.g., https://www.google.com)
-2. Press Ctrl+Shift+S (or Cmd+Shift+S on Mac)
-3. OR right-click on the page and select "PraisonAI" → "Capture Screenshot"
+| Removed | Reason |
+| --- | --- |
+| `alarms` | Never called anywhere in the source or the bundle. |
+| `tabCapture` | Only call site was in a function nothing invoked; the bundler removed the code entirely. |
+| `offscreen` | Its only purpose was a persistent WebSocket to a local server, which has been removed. |
+| `scripting` | Its only call site was the Summarize tool, which has been removed. |
+| `activeTab` | No longer needed — nothing requires host access. |
+| `host_permissions: <all_urls>` | No longer needed — `chrome.debugger` requires no host permissions. |
 
-**Expected:** A notification appears confirming "Screenshot Captured" with message "Screenshot saved successfully".
+Also removed: the content script that was injected into every page (nothing ever
+sent it a message), `externally_connectable` (no external message listener
+existed), `web_accessible_resources` (no resource was ever requested), and the
+`ws://localhost:*` and `http://localhost:*` entries from the content security
+policy.
 
-### 3. CONTEXT MENU (contextMenus permission)
-**Steps:**
-1. Navigate to any website
-2. Right-click anywhere on the page
-3. Look for "PraisonAI" in the context menu
+**Functionality now matches the description.**
 
-**Expected:** Context menu shows "PraisonAI" with sub-options including "Capture Screenshot".
+- The AI agent and the local PraisonAI bridge server have been removed. Both
+  required something the user had to set up separately — a local server, or a
+  downloaded on-device model — so neither was reproducible on a clean profile.
+  Everything the extension now advertises works immediately after install.
+- "Record sessions" has been removed from the description. The feature was not
+  present in the shipped build.
+- Screenshots are shown in the panel with a Save link. The previous notification
+  said "Screenshot saved successfully" when nothing had been saved; it now
+  reports what actually happened.
+- Failed actions are now reported as failures, in the panel, with the reason.
+  The previous build could display "Completed" after an action had failed.
+- The Console Logs tool now works. The required CDP domain was never enabled.
+  The captured output is also mirrored to `chrome.storage.session`, so it is not
+  lost when Chrome suspends the service worker.
+- Removed the `start-agent` keyboard command and the context menu entries that
+  pointed at removed features.
+- Debug logging that echoed the user's typed text to the console has been removed.
 
-### 4. KEYBOARD SHORTCUTS (commands)
-**Steps:**
-1. Press Ctrl+Shift+P (or Cmd+Shift+P on Mac) to toggle side panel
-2. Press Alt+A (or Option+A on Mac) to start agent
-3. Press Ctrl+Shift+S (or Cmd+Shift+S on Mac) to capture screenshot
+**Every remaining action now reports its real outcome.**
 
-**Expected:** Each shortcut performs its designated action.
+| Was | Now |
+| --- | --- |
+| Navigate reported success even when the page failed to load | Waits for the load to complete and fails on `errorText`, e.g. `net::ERR_NAME_NOT_RESOLVED` |
+| Type reported success even when the target accepted no text | Re-reads the element and fails with an explanation if the text did not land |
+| Click, type and scroll returned unconditional success | Return the actual result of the CDP command |
+| A thrown JavaScript error showed the literal word "Uncaught" | Shows `exception.description` — the real message and stack |
+| End Session relied on an in-memory map the service worker loses when suspended, leaving the banner stranded | Calls `chrome.debugger.detach` on the tab directly and reports the real outcome, including "No active session on this tab." |
+| The panel followed the last focused window, so two panels fought over one tab | Scopes to its own window via `chrome.windows.getCurrent()` |
+| Overlapping actions could tear down each other's CDP session | The panel disables its controls while an action runs |
+| A stale screenshot could be restored into the panel indefinitely | Restored only if it was captured within the last five minutes |
+| A brand-new tab produced the `chrome://` restriction message | Says "Open a website in this tab first, then try again." |
 
-### 5. STORAGE (storage permission)
-**Steps:**
-1. Open the side panel
-2. If there are any settings/preferences, modify them
-3. Close and reopen the browser
-4. Open the side panel again
+Also in this build: the `_execute_action` command was replaced by an explicit
+`open-panel` command handled in `chrome.commands.onCommand`
+(<kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> is unchanged), and the two
+context-menu items moved from `contexts: ['page']` to `contexts: ['all']` so
+they are reachable from a right-click on a link, an image or a selection.
 
-**Expected:** Settings are preserved between browser sessions.
+The parked agent and bridge source lives in `future/agent-mode/`, which is not an
+entry point in the build and is not included in the package. See
+`future/agent-mode/RESTORE.md`.
 
-### 6. OFFSCREEN DOCUMENT (offscreen permission)
-**Purpose:** Used for session recording with MediaRecorder API (not available in service workers).
+---
 
-**Steps to verify offscreen is used:**
-1. Open Chrome DevTools (F12)
-2. Go to Application tab → Service Workers
-3. The extension registers an offscreen document for recording functionality
-4. The offscreen.html file is included in the extension package
+## Promo Assets
 
-**Technical verification:** The offscreen document contains MediaRecorder code for video capture, which requires DOM APIs unavailable in Manifest V3 service workers.
+### Regenerated — ready to upload
 
-### 7. DEBUGGER (debugger permission)
-**Purpose:** Used for Chrome DevTools Protocol (CDP) to reliably detect and interact with page elements.
+Both tiles were rebuilt to match the original design with compliant copy. Use
+these, not the originals in `store_assets/`.
 
-**Steps:**
-1. Open side panel
-2. Navigate to a website with interactive elements
-3. The extension uses CDP to identify clickable elements, form fields, etc.
+| File | Size | Copy |
+| --- | --- | --- |
+| `store_assets/v1.0.4/marquee_promo_tile_1400x560.jpg` | 1400×560 | "PraisonAI Browser Agent" / "Browser Automation Side Panel" / "Navigate · Click · Type · Run JavaScript · Screenshot" |
+| `store_assets/v1.0.4/small_promo_tile_440x280.jpg` | 440×280 | "PraisonAI" / "Browser Automation Side Panel" / "Navigate · Click · Type · Screenshot" |
 
-**Expected:** Extension can detect and list interactive elements on the page.
+The originals said "AI-Powered Browser Automation", "Control with Natural
+Language" and "AI Browser Agent". Store policy on false or misleading
+information covers images, so those must not be uploaded again.
 
-### 8. TABS (tabs permission)
-**Purpose:** Manage browser tabs during multi-step automation.
+### Screenshot — you must capture this yourself
 
-**Steps:**
-1. Open side panel
-2. The extension can read tab URLs and titles to provide context
-3. During automation, it may open/switch tabs as needed
+`store_assets/screenshot_1280x800.png` shows the removed Agent tab, the
+"Start Agent" button, "Agent Activity", and the "search for 'AI agents'"
+placeholder. It advertises the exact feature that was removed and cannot be
+reused.
 
-**Expected:** Extension displays current tab information in side panel.
+A store screenshot has to show the real product, so capture it during the smoke
+test rather than mocking it up:
 
-### 9. SCRIPTING (scripting permission)
-**Purpose:** Inject content scripts to interact with page elements.
+1. `npm run build`, then load `dist/` unpacked at `chrome://extensions`
+2. Open a normal site (example.com), open the side panel
+3. Run one action so the Output box has real content — "Extract Data" gives a
+   nice JSON payload, or run `document.title`
+4. Capture the window at **1280×800** (or 640×400)
+5. Save as `store_assets/v1.0.4/screenshot_1280x800.png`
 
-**Steps:**
-1. Navigate to any website
-2. The content script (content.js) is automatically injected
-3. This enables the extension to read page content and execute actions
-
-**Expected:** Extension can read and interact with page elements.
-
-### 10. HOST PERMISSIONS (<all_urls>)
-**Purpose:** Browser automation tool must work on any website the user chooses.
-
-**Justification:** Users may want to automate tasks on any website (shopping, booking, forms, etc.). The extension only accesses pages when user explicitly initiates an action via side panel, keyboard shortcut, or context menu.
-
-## Files in Extension Package
-
-| File | Purpose |
-|------|---------|
-| manifest.json | Extension configuration and permissions |
-| background.js | Service worker handling events and CDP |
-| content.js | Content script for page interaction |
-| sidepanel.html/js | Side panel user interface |
-| offscreen.html/js | MediaRecorder for session recording |
-| icons/ | Extension icons (16, 32, 48, 128px) |
-
-## No Remote Code Execution
-
-All JavaScript code is bundled within the extension package at build time. The extension does not download or execute any remote code. Network connections are only used for:
-- Optional local development server (localhost only)
-- User-configured AI API endpoints (if user chooses to configure)
-
-## Privacy
-
-- All processing happens locally in the browser
-- No data is sent to external servers unless user explicitly configures an AI provider
-- No browsing history is stored or transmitted
-- Screenshots and recordings are saved locally only
+Take two or three while you are there — a listing is allowed up to five, and
+showing the Tools tab, a screenshot result, and the History tab covers the
+feature list. At least one screenshot is required.

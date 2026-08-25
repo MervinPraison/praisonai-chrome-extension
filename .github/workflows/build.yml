@@ -25,10 +25,13 @@ jobs:
         run: npm ci
 
       - name: Run linting
-        run: npm run lint || true
+        run: npm run lint
 
       - name: Run type checking
-        run: npm run typecheck || true
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
 
       - name: Build extension
         run: npm run build

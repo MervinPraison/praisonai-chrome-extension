@@ -1,220 +1,188 @@
-# PraisonAI Chrome Extension
+# PraisonAI Browser Agent
 
-AI-powered browser automation with Side Panel and PraisonAI Agent integration.
+A Chrome side panel that drives the active tab through the Chrome DevTools
+Protocol. Navigate, click, type, run JavaScript, scroll, screenshot, extract
+page data and read console output — all locally, with no server, no account and
+no model.
+
+Docs: **<https://chrome.praison.ai>**  ·  Version **1.0.4**
 
 ## Features
 
-- 🤖 **Browser Agent** - AI agent that observes screenshots, decides, and acts
-- 🌉 **Bridge Server** - Connects to PraisonAI for vision-capable LLMs (GPT-4o, Gemini, Claude)
-- 🎯 **CDP Automation** - Chrome DevTools Protocol for precise browser control
-- 📌 **Side Panel** - Persistent UI that stays open across tabs
-- 📸 **Screenshots** - Capture page state for AI vision analysis
-- 🎥 **Recording** - Record browser sessions as video
-- 📋 **Data Extraction** - Extract structured data from pages
+- **Navigate** — load a URL in the active tab, wait for it to finish loading,
+  and fail with the network error if it does not
+- **Click** — click the first element matching a CSS selector
+- **Type** — clear a field matched by a selector, type into it, and verify the
+  text landed
+- **Run JavaScript** — evaluate one expression in the page and show the result
+- **Scroll** — scroll the page up or down
+- **Screenshot** — capture the viewport, shown in the panel with a *Save image*
+  link (nothing is written to disk automatically)
+- **Extract Data** — page title, URL, headings, links and images as JSON
+- **Console Logs** — console output captured since the session attached, kept in
+  `chrome.storage.session` so it survives the service worker being suspended
+- **End Session** — detach the debugger and report what actually happened
+- **History** — the last 50 actions, stored locally in `chrome.storage.local`
 
-> **Note:** Gemini Nano (Chrome's built-in AI) is **disabled for Agent mode** because it's text-only and cannot process screenshots. Use the CLI with bridge server for reliable automation.
+The panel scopes itself to its own browser window and disables its controls
+while an action is running.
+
+Keyboard shortcuts (both declared as `commands` in the manifest and handled in
+`chrome.commands.onCommand`): `open-panel` on
+<kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> opens the panel,
+`capture-screenshot` on <kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>
+captures a screenshot. Two context-menu items — *Capture screenshot* and *Open
+PraisonAI panel* — are registered with `contexts: ['all']`, so they appear on
+the page and on links, images and selected text.
+
+## Two disclosures up front
+
+- **Chrome shows a debugging banner.** Controlling a page requires attaching
+  Chrome's debugger, and Chrome displays *"PraisonAI Browser Agent started
+  debugging this browser"* for as long as it is attached. That banner is
+  Chrome's and cannot be hidden. Click **End Session** (or *Cancel* in the
+  banner) to detach.
+- **Chrome blocks automation on some pages.** `chrome://` pages, other
+  extensions' pages, `devtools://`, `about:` pages (except `about:blank`) and the Chrome Web Store
+  cannot be automated. The panel says so before you try. A brand-new, empty tab
+  gets a different message — *"Open a website in this tab first"* — because
+  there is no page to act on yet.
 
 ## Requirements
 
-- Chrome 120+ 
-- Python 3.10+ with `praisonai` installed
-- API key for vision-capable LLM (OpenAI, Gemini, or Anthropic)
+- Chrome 116+ (`chrome.sidePanel.open()`, used by the `open-panel` command and
+  the context-menu item, was added in 116)
+- Node 20+ to build from source
 
+Nothing else. No API key, no Python, no companion app.
 
-## Quick Install
+## Install
 
-### Option 1: Direct Download (Recommended)
+### From a release
 
-[![Download Extension](https://img.shields.io/badge/Download-Extension-blue?style=for-the-badge&logo=googlechrome)](https://github.com/MervinPraison/praisonai-chrome-extension/releases/latest/download/praisonai-extension.zip)
+1. Download
+   [`praisonai-extension.zip`](https://github.com/MervinPraison/praisonai-chrome-extension/releases/latest/download/praisonai-extension.zip)
+2. Unzip it
+3. Open `chrome://extensions`, enable **Developer mode**
+4. Click **Load unpacked** and select the unzipped folder
 
-1. **[Download praisonai-extension.zip](https://github.com/MervinPraison/praisonai-chrome-extension/releases/latest/download/praisonai-extension.zip)**
-2. Unzip the downloaded file
-3. Open `chrome://extensions` in Chrome
-4. Enable **Developer mode** (top right toggle)
-5. Click **Load unpacked**
-6. Select the unzipped folder
-
-### Option 2: From GitHub Actions (Latest Build)
-
-1. Go to [GitHub Actions](https://github.com/MervinPraison/praisonai-chrome-extension/actions)
-2. Click the latest successful **Build Extension** workflow
-3. Download the `praisonai-extension` artifact
-4. Follow steps 2-6 above
-
-> **Note:** The extension will also be available on Chrome Web Store once approved.
-
-## Installation
-
-### Development
+### From source
 
 ```bash
-# Clone and install
-cd ~/praisonai-chrome-extension
 npm install
-
-# Build for development
-npm run dev
-
-# Run tests
-npm test
-
-# Build for production
-npm run build
+npm run build        # writes dist/
 ```
 
-### Load Extension
+Then load `dist/` unpacked:
 
 1. Open `chrome://extensions`
-2. Enable "Developer mode"
-3. Click "Load unpacked"
+2. Enable **Developer mode**
+3. Click **Load unpacked**
 4. Select the `dist` folder
 
-### Enable Built-in AI
+Other scripts:
 
-1. Open `chrome://flags`
-2. Enable `#prompt-api-for-gemini-nano`
-3. Enable `#optimization-guide-on-device-model`
-4. Restart Chrome
+```bash
+npm run dev          # watch build
+npm run build:zip    # build + zip dist/ to praisonai-extension.zip
+npm test             # vitest
+npm run typecheck    # tsc --noEmit
+npm run lint
+```
 
 ## Usage
 
-### Agent Mode (Recommended: CLI)
+1. Open a normal `http(s)` page.
+2. Open the panel (toolbar icon or <kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>).
+3. Run an action — try `document.title` in **Run JavaScript**.
+4. Click **End Session** when you are done, to detach the debugger.
 
-The most reliable way to use the browser agent:
-
-```bash
-# Install praisonai if not already
-pip install praisonai
-
-# Set your API key
-export OPENAI_API_KEY="your-key"
-# or: export GEMINI_API_KEY="your-key"
-
-# Launch browser automation
-praisonai browser launch "Go to google.com and search for AI"
-praisonai browser launch "Find flights to Paris" --model gpt-4o
-```
-
-This automatically:
-1. Starts the bridge server
-2. Launches Chrome with the extension
-3. Runs your goal with vision-capable AI
-
-### Side Panel (Requires Bridge Server)
-
-If using the side panel directly:
-
-1. First start the bridge server: `praisonai browser start`
-2. Click the extension icon to open Side Panel
-3. Enter a task goal
-4. Click "Start Agent"
-
-> **Important:** Without the bridge server, you'll see an error. Side panel fallback to Gemini Nano is disabled because it cannot process screenshots.
-
-### Tools Mode
-
-
-- **Navigate** - Go to a URL
-- **Click** - Click element by CSS selector
-- **Type** - Type text into an element
-- **Evaluate** - Run JavaScript in page context
-
-### CLI Integration
-
-Run automation directly from terminal when extension is connected:
-
-```bash
-# Start the bridge server
-praisonai browser start
-
-# Run a goal with live progress
-praisonai browser run "Go to google and search praisonai" --debug
-
-# Manage tabs
-praisonai browser tabs
-
-# Execute JavaScript
-praisonai browser execute "document.title"
-
-# Take screenshot
-praisonai browser screenshot -o page.png
-```
-
-See [PraisonAI Browser Agent Docs](https://docs.praison.ai/docs/features/browser-agent) for full CLI reference.
+Failures are always reported in the panel's Output box; no action reports
+success unless it ran.
 
 ## Architecture
 
 ```
-src/
-├── background/         # Service worker
-│   └── index.ts       # Message routing, CDP sessions
-├── cdp/               # Chrome DevTools Protocol
-│   └── client.ts      # CDP client via chrome.debugger
-├── ai/                # AI integration
-│   ├── builtin.ts     # Gemini Nano APIs
-│   └── agent.ts       # Browser agent
-├── content/           # Content script
-│   └── index.ts       # DOM interaction
-├── sidepanel/         # Side Panel UI
-│   ├── sidepanel.html
-│   ├── styles.css
-│   └── index.ts
-└── offscreen/         # Offscreen document
-    └── index.ts       # Video recording, canvas ops
+Side panel  --chrome.runtime.sendMessage-->  Background service worker
+                                                     |
+                                              CDPClient (src/cdp/client.ts)
+                                                     |
+                                              chrome.debugger --> the tab
 ```
+
+```
+src/
+├── background/
+│   └── index.ts      # service worker: CDP sessions, message router, history,
+│                     #   commands, context menus
+├── cdp/
+│   └── client.ts     # CDPClient — chrome.debugger.attach / sendCommand wrapper
+└── sidepanel/
+    ├── sidepanel.html
+    ├── styles.css
+    └── index.ts      # the entire UI
+```
+
+`vite.config.ts` builds exactly two entry points, `background` and
+`sidepanel`, and copies `manifest.json`, `sidepanel.html`, `styles.css` and the
+icons into `dist/`.
+
+### `future/agent-mode/` is parked code
+
+The repository keeps the agent-mode code that was removed in 1.0.4 under
+`future/agent-mode/`, alongside a `RESTORE.md` explaining why it was cut and
+what must be fixed first. **It is not built and not shipped** — it has
+no entry point in `vite.config.ts` and never reaches `dist/` or the packaged
+archive. See <https://chrome.praison.ai/removed-features/>.
 
 ## Permissions
 
-| Permission | Purpose |
-|------------|---------|
-| `sidePanel` | Side Panel UI |
-| `debugger` | CDP access for automation |
-| `scripting` | Content script injection |
-| `activeTab` | Current tab access |
-| `tabs` | Tab information |
-| `storage` | Save history |
-| `contextMenus` | Right-click menu |
-| `notifications` | User notifications |
-| `offscreen` | Video recording |
+Six, and no host permissions declared.
 
-## Testing
+> **Chrome will still warn** that the extension can *"Read and change all your
+> data on all websites."* That comes from `debugger`, which the DevTools
+> Protocol requires — it is the ceiling of what the permission allows, not what
+> the extension does. `chrome.permissions.getAll()` reports `origins: []`. The
+> debugger attaches to one tab at a time and only in response to something you
+> did, shows Chrome's banner throughout, and detaches on **End Session**, when
+> the panel closes, or straight after a shortcut/right-click screenshot taken
+> with the panel closed.
 
-```bash
-# Run all tests
-npm test
+| Permission | Why |
+|------------|-----|
+| `sidePanel` | The extension is a side panel |
+| `tabs` | Read the active tab's URL to target it and to warn when Chrome blocks automation there |
+| `debugger` | Every action: navigate, click, type, evaluate, screenshot, via CDP |
+| `storage` | Local action history (`local`), plus the most recent screenshot and each tab's captured console output (`session`) |
+| `contextMenus` | Two right-click items, `contexts: ['all']` |
+| `notifications` | Report the result of a screenshot taken while the panel is closed |
 
-# Watch mode
-npm run test:watch
+`chrome.runtime`, `chrome.commands` and `chrome.windows` are also used and need
+no permission entry. That is the complete set of Chrome APIs the shipped code
+touches: `runtime`, `tabs`, `windows`, `debugger`, `storage`, `sidePanel`,
+`commands`, `contextMenus`, `notifications`.
 
-# Coverage report
-npm run test:coverage
-```
-
-## Chrome Web Store
-
-### Building for Submission
-
-```bash
-npm run build:zip
-```
-
-This creates `praisonai-extension.zip` ready for upload.
-
-### Review Guidelines
-
-This extension follows Chrome Web Store policies:
-- ✅ No remote code execution
-- ✅ Minimal permissions
-- ✅ Clear privacy policy
-- ✅ Transparent functionality
-- ✅ On-device AI processing
+Not requested: host permissions, `scripting`, content scripts, `downloads`,
+`offscreen`, `alarms`, `activeTab`, `cookies`, `webRequest`,
+`externally_connectable`.
 
 ## Privacy
 
-- All AI processing uses on-device Gemini Nano
-- No data sent to external servers
-- History stored locally in browser storage
-- CDP only attaches when user initiates action
+- No network requests. No server, no account, no analytics, no telemetry.
+- No remote code: CSP is `script-src 'self'; object-src 'self'`.
+- History stays in `chrome.storage.local`; **Clear history** or uninstalling
+  removes it.
+- The last screenshot and each tab's captured console output stay in
+  `chrome.storage.session`, which Chrome clears on exit. **End Session** or
+  closing the tab drops that tab's console output immediately.
+- The debugger attaches only to a tab you act on, only while you are using it,
+  and Chrome shows a banner the whole time.
+
+## Chrome Web Store build
+
+```bash
+npm run build:zip     # -> praisonai-extension.zip, built from dist/ only
+```
 
 ## License
 

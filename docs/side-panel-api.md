@@ -1,283 +1,111 @@
-# Side Panel API Reference
+# Message Reference
 
-> Documentation of Chrome's `chrome.sidePanel` API for the PraisonAI Browser Agent extension.
+This page documents the internal messages the side panel sends to the
+background service worker. It is here for people reading the source; it is not
+a public API.
 
-## Availability
+!!! note "Not reachable from outside the extension"
+    The manifest declares no `externally_connectable`, so no website and no
+    other extension can send these messages. They travel over
+    `chrome.runtime.sendMessage` between the extension's own panel and its own
+    service worker.
 
-- **Chrome 114+** for basic Side Panel
-- **Chrome 116+** for `sidePanel.open()` programmatic opening
-- **Chrome 140+** for `getLayout()` and `Side` type
-- **Chrome 141+** for `onOpened` event
-- **Chrome 144+** for `onClosed` event
+## Envelope
 
-## Permissions
+Request:
 
-```json
+```ts
 {
-  "permissions": ["sidePanel"]
+  type: string;        // one of the types below
+  tabId?: number;      // required for every tab-scoped action
+  url?: string;        // CDP_NAVIGATE
+  selector?: string;   // CDP_CLICK, CDP_TYPE
+  text?: string;       // CDP_TYPE
+  expression?: string; // CDP_EVALUATE
+  direction?: 'up' | 'down'; // CDP_SCROLL
 }
 ```
 
-## Manifest Configuration
+Response — always this shape:
 
-```json
-{
-  "side_panel": {
-    "default_path": "sidepanel.html"
-  }
-}
+```ts
+{ success: true, data?: unknown }
+{ success: false, error: string }
 ```
 
----
-
-## Methods
-
-### `setPanelBehavior(behavior)`
-
-Configure whether clicking the action icon opens the side panel.
-
-```javascript
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-```
-
-### `getPanelBehavior()`
-
-Get current panel behavior configuration.
-
-```javascript
-const { openPanelOnActionClick } = await chrome.sidePanel.getPanelBehavior();
-```
-
-### `setOptions(options)`
-
-Configure side panel for specific tabs or globally.
-
-```javascript
-// Global panel
-await chrome.sidePanel.setOptions({ path: 'sidepanel.html' });
-
-// Tab-specific panel
-await chrome.sidePanel.setOptions({
-  tabId: 123,
-  path: 'tab-sidepanel.html',
-  enabled: true
-});
-
-// Disable for specific tab
-await chrome.sidePanel.setOptions({
-  tabId: 123,
-  enabled: false
-});
-```
-
-### `getOptions(options)`
-
-Get current panel options.
-
-```javascript
-const { path, enabled } = await chrome.sidePanel.getOptions({ tabId: 123 });
-```
-
-### `open(options)` — Chrome 116+
-
-Programmatically open the side panel. **Must be called in response to user action.**
-
-```javascript
-// Open for entire window
-await chrome.sidePanel.open({ windowId: tab.windowId });
-
-// Open for specific tab
-await chrome.sidePanel.open({ tabId: tab.id });
-```
-
-### `close(options)` — Chrome 141+
-
-Close the side panel.
-
-```javascript
-// Close for specific tab
-await chrome.sidePanel.close({ tabId: 123 });
-
-// Close for window
-await chrome.sidePanel.close({ windowId: 456 });
-```
-
-### `getLayout()` — Chrome 140+
-
-Get the panel's current layout (left or right side).
-
-```javascript
-const { side } = await chrome.sidePanel.getLayout();
-// side: "left" | "right"
-```
-
----
-
-## Events
-
-### `onOpened` — Chrome 141+
-
-Fired when the side panel is opened.
-
-```javascript
-chrome.sidePanel.onOpened.addListener((info) => {
-  console.log('Panel opened:', info.path, info.windowId, info.tabId);
-});
-```
-
-### `onClosed` — Chrome 144+
-
-Fired when the side panel is closed.
-
-```javascript
-chrome.sidePanel.onClosed.addListener((info) => {
-  console.log('Panel closed:', info.path, info.windowId, info.tabId);
-});
-```
-
----
-
-## Types
-
-### `PanelBehavior`
-
-```typescript
-interface PanelBehavior {
-  openPanelOnActionClick?: boolean;
-}
-```
-
-### `PanelOptions`
-
-```typescript
-interface PanelOptions {
-  tabId?: number;    // Apply to specific tab (optional)
-  path?: string;     // HTML file path
-  enabled?: boolean; // Enable/disable panel
-}
-```
-
-### `OpenOptions`
-
-```typescript
-interface OpenOptions {
-  tabId?: number;    // Open for specific tab
-  windowId?: number; // Open for entire window
-}
-```
-
-### `CloseOptions` — Chrome 141+
-
-```typescript
-interface CloseOptions {
-  tabId?: number;
-  windowId?: number;
-}
-```
-
-### `Side` — Chrome 140+
-
-```typescript
-type Side = "left" | "right";
-```
-
----
-
-## Common Patterns
-
-### 1. Global Side Panel (All Sites)
-
-```javascript
-// manifest.json
-{
-  "side_panel": { "default_path": "sidepanel.html" },
-  "permissions": ["sidePanel"]
-}
-
-// service-worker.js
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-});
-```
-
-### 2. Site-Specific Side Panel
-
-```javascript
-const ALLOWED_ORIGIN = 'https://example.com';
-
-chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
-  if (!tab.url) return;
-  const url = new URL(tab.url);
-  
-  await chrome.sidePanel.setOptions({
-    tabId,
-    path: 'sidepanel.html',
-    enabled: url.origin === ALLOWED_ORIGIN
-  });
-});
-```
-
-### 3. Multiple Side Panels
-
-```javascript
-const welcomePage = 'sidepanels/welcome.html';
-const mainPage = 'sidepanels/main.html';
-
-chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-  const { path } = await chrome.sidePanel.getOptions({ tabId });
-  if (path === welcomePage) {
-    await chrome.sidePanel.setOptions({ path: mainPage });
-  }
-});
-```
-
-### 4. Open from Content Script
-
-```javascript
-// content-script.js
-button.addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: 'open_side_panel' });
-});
-
-// service-worker.js
-chrome.runtime.onMessage.addListener((message, sender) => {
-  if (message.type === 'open_side_panel') {
-    chrome.sidePanel.open({ tabId: sender.tab.id });
-  }
-});
-```
-
-### 5. Context Menu Integration
-
-```javascript
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: 'openSidePanel',
-    title: 'Open side panel',
-    contexts: ['all']
-  });
-});
-
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === 'openSidePanel') {
-    chrome.sidePanel.open({ windowId: tab.windowId });
-  }
-});
-```
-
----
-
-## Best Practices
-
-1. **User Gesture Required**: `sidePanel.open()` must be called in response to user action
-2. **Tab vs Window**: Use `tabId` for tab-specific panels, `windowId` for global
-3. **Error Handling**: Always use `.catch()` for async operations
-4. **Performance**: Side panels have full access to Chrome APIs but share resources
-5. **Persistence**: Side panel remains open when navigating between tabs (unless disabled)
-
----
-
-## References
-
-- [Chrome Side Panel API](https://developer.chrome.com/docs/extensions/reference/api/sidePanel)
-- [Side Panel Samples](https://github.com/GoogleChrome/chrome-extensions-samples/tree/main/functional-samples)
+An unknown `type` returns `{ success: false, error: 'Unknown action: …' }`.
+
+## Tab actions
+
+| Type | Extra fields | Returns | History entry |
+| --- | --- | --- | --- |
+| `CDP_NAVIGATE` | `url` | `"Navigated to <url>"` | Navigate |
+| `CDP_CLICK` | `selector` | `"Clicked <selector>"` | Click |
+| `CDP_TYPE` | `selector`, `text` | `"Typed into <selector>"` | Type |
+| `CDP_SCROLL` | `direction` | `"Scrolled up"` / `"Scrolled down"` | ✓ |
+| `CDP_EVALUATE` | `expression` | The evaluated value | Run JavaScript |
+| `CDP_SCREENSHOT` | — | `data:image/png;base64,…` | Screenshot |
+| `EXTRACT_DATA` | — | JSON string: title, url, headings, links, images | Extract Data |
+| `GET_CONSOLE_LOGS` | — | `Array<{ level, text }>` | — |
+| `GET_TAB_INFO` | — | `{ id, url, title, restricted }` | — |
+| `DETACH` | — | `"Session ended. The debugging banner is gone."`, or `"No active session on this tab."` | — |
+
+Each of these attaches a CDP session to `tabId` if one is not already open, and
+fails with a readable message if the tab is gone, the tab has no page loaded
+yet, or Chrome forbids automation on it.
+
+`CDP_NAVIGATE`, `CDP_CLICK`, `CDP_TYPE` and `CDP_SCROLL` all forward the real
+outcome of the underlying CDP call: the success strings above are only returned
+when the command actually reported success.
+
+- `CDP_NAVIGATE` waits for `document.readyState === 'complete'` (up to 10 s)
+  before returning, and fails outright if `Page.navigate` comes back with an
+  `errorText` such as `net::ERR_NAME_NOT_RESOLVED`.
+- `CDP_TYPE` re-reads the target element after inserting the text and fails if
+  the text did not land.
+
+`DETACH` calls `chrome.debugger.detach` on the tab directly rather than relying
+on the in-memory session map, which the service worker loses when it is
+suspended. It also drops that tab's console buffer from memory and from
+`chrome.storage.session`.
+
+## Storage actions
+
+| Type | Returns |
+| --- | --- |
+| `GET_HISTORY` | `Array<{ action, detail, at }>`, newest first, max 50 |
+| `CLEAR_HISTORY` | `"History cleared"` |
+| `GET_LAST_SCREENSHOT` | `{ dataUrl, capturedAt }` or `null` |
+
+`GET_HISTORY` and `CLEAR_HISTORY` read and write `chrome.storage.local`;
+`GET_LAST_SCREENSHOT` reads `chrome.storage.session`. The panel calls
+`GET_LAST_SCREENSHOT` once on open and only displays the image if
+`capturedAt` is less than five minutes old.
+
+## Error strings you may see
+
+| Error | Cause |
+| --- | --- |
+| `No tab selected.` | The message carried no `tabId` |
+| `That tab is no longer open.` | `chrome.tabs.get` failed |
+| `Open a website in this tab first, then try again.` | The tab is brand new or empty — it has no URL yet, or it is `chrome://newtab/` |
+| `Chrome does not allow automation on this page. Open a normal website tab and try again.` | Restricted URL |
+| `Failed to attach debugger: …` | Chrome refused the attach (another debugger client, for instance) |
+| `Debugger not attached` | A command was sent after the session detached |
+| `Enter a valid URL, for example https://example.com` | Empty or non-http(s) URL |
+| `net::ERR_NAME_NOT_RESOLVED` (and other `net::` codes) | `Page.navigate` reported `errorText`; the page did not load |
+| `Enter a CSS selector, for example #submit or .btn-primary` | Empty selector |
+| `All click methods failed for: <selector>` | The selector matched nothing, or none of the three click strategies worked |
+| `No element matched <selector>` | Fallback wording when the click or type failed without its own message |
+| `Invalid selector (jQuery-style not supported): …` | `$(...)` and friends. `:has(...)` is standard CSS and is accepted |
+| `Text was not accepted by <tag> "<selector>". Check that the selector points at an input, textarea or editable element.` | The text was inserted but did not land in the element |
+
+## Non-message entry points
+
+| Trigger | Handler |
+| --- | --- |
+| Toolbar icon | `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` — Chrome opens the panel itself, so there is no `chrome.action.onClicked` listener |
+| <kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> | `chrome.commands.onCommand` with command `open-panel` → `chrome.sidePanel.open({ windowId })` |
+| <kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | `chrome.commands.onCommand` with command `capture-screenshot` → capture screenshot + notification |
+| Context menu items (`contexts: ['all']`) | `chrome.contextMenus.onClicked` → capture screenshot, or open the panel |
+| Debugger detached / tab closed | `chrome.debugger.onDetach`, `chrome.tabs.onRemoved` → drop the session (and, on tab close, the tab's console buffer) |
