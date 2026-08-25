@@ -92,9 +92,9 @@ GOOD TO KNOW
 WHAT THE PERMISSION WARNING MEANS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Chrome will warn that this extension can "Read and change all your data on all
-websites". That warning comes from the debugger permission, which is what the
-Chrome DevTools Protocol requires. It is the honest ceiling of what the
+Chrome shows two warnings at install: "Access the page debugger backend" and
+"Read and change all your data on all websites". Both come from the debugger
+permission, which is what the Chrome DevTools Protocol requires. It is the honest ceiling of what the
 permission allows, and we would rather explain it than let it surprise you.
 
 What the extension actually does with it:
@@ -428,7 +428,6 @@ The screenshots are real captures of the built extension driving a live
 `example.com` — the left half is the page, the right half is the side panel, at
 the proportions Chrome docks them. Regenerate with `node store_assets/compose.mjs`.
 
-**Do not upload anything from `store_assets/v1.0.3-rejected/`.** Those are the
-assets that accompanied the rejected submission: the screenshot shows the
-removed Agent tab, and both tiles carry "AI-Powered Browser Automation" and
-"Automate with Natural Language" baked into the image.
+The assets from the rejected submission have been deleted from the repository —
+the old screenshot showed the removed Agent tab and both tiles carried
+"AI-Powered Browser Automation" baked into the image.

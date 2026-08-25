@@ -1,11 +1,13 @@
 # Agent Mode — parked for later
 
 This directory holds the AI agent + PraisonAI bridge code that was removed from the
-shipped extension in v1.0.4. **Nothing here is built or packaged.** `vite.config.ts`
-has no entry point under `future/`, and the store ZIP is built from `dist/` only, so
-this code cannot reach a reviewer.
+shipped extension in v1.0.4. **It is not built and not shipped.** `vite.config.ts`
+declares no entry point under `future/`, and the package is built from `dist/` only.
 
-It is parked, not deleted, so it can come back once the store listing is approved.
+It is kept for reference rather than deleted. Anything here that returns will do so
+only after the defects listed below are fixed, and will be declared in the store
+listing and the manifest permissions at that time — the listing describes what the
+extension does, so a feature cannot come back without the listing changing with it.
 
 ## Why it was removed
 
@@ -45,8 +47,8 @@ invisible. That is the exact shape of the policy they cited.
 
 ## Before bringing any of it back
 
-These are the conditions that made the old code non-compliant. Fix them in the code, not
-in the listing.
+These are the defects that made the old code non-functional. They are engineering
+problems and the fix belongs in the code, not in the description.
 
 - [ ] **A typed goal must do something on a clean profile** — no server, no model, no flags.
       Ship a deterministic executor and treat AI as an accelerator on top of it.
@@ -65,6 +67,8 @@ in the listing.
       system prompt was silently dropped.
 - [ ] **Re-declare permissions only alongside working, reachable features**, and make each
       store justification describe what the code does — not what it was going to do.
+- [ ] **Update the store listing in the same submission**, so the description, the
+      screenshots and the permissions all describe the same product.
 - [ ] **Restore the CSP and `externally_connectable` entries** only if the localhost bridge is
       genuinely part of the shipped product. If the bridge is developer-only, it does not belong
       in a store build at all — ship it as an unpacked dev build.

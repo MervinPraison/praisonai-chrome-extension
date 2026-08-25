@@ -31,8 +31,9 @@ in the panel and are not persisted.
 
 ## Access to pages
 
-Chrome warns that this extension can "Read and change all your data on all
-websites". That warning comes from the `debugger` permission, which the Chrome
+Chrome shows two warnings at install — "Access the page debugger backend" and
+"Read and change all your data on all websites". Both come from the `debugger`
+permission, which the Chrome
 DevTools Protocol requires; it is the ceiling of what the permission allows, not
 a description of what the extension does. `chrome.permissions.getAll()` reports
 no origins at all.

@@ -1,25 +1,28 @@
-/**
- * Run every e2e file in sequence and print one scoreboard.
- *
- * Each file is standalone (`node smoke.mjs`, `node windows.mjs`, ...) and owns
- * a unique debugging port and HTTP port, so they never collide.
- *
- *   node all.mjs
- */
-import { spawn } from 'node:child_process';
+/** Run every e2e suite sequentially and report a combined total. */
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const FILES = ['smoke.mjs', 'detach.mjs', 'restricted.mjs', 'windows.mjs', 'tabs.mjs', 'actions.mjs', 'worker.mjs', 'menus.mjs'];
-const results = [];
+const SUITES = [
+    'install', 'smoke', 'reviewer-guide', 'step5', 'restricted',
+    'windows', 'tabs', 'actions', 'worker', 'attachrace', 'detach', 'menus',
+];
 
-for (const file of FILES) {
-    const started = Date.now();
-    const code = await new Promise((resolve) => {
-        const p = spawn(process.execPath, [file], { stdio: 'inherit', cwd: import.meta.dirname });
-        p.on('exit', resolve);
-    });
-    results.push({ file, code, secs: Math.round((Date.now() - started) / 1000) });
+let pass = 0, fail = 0, unverified = 0;
+const rows = [];
+
+for (const name of SUITES) {
+    const file = fileURLToPath(new URL(`./${name}.mjs`, import.meta.url));
+    const r = spawnSync(process.execPath, [file], { encoding: 'utf8' });
+    const out = (r.stdout || '') + (r.stderr || '');
+    const p = (out.match(/^ {2}✓/gm) || []).length;
+    const f = (out.match(/^ {2}✗/gm) || []).length;
+    const u = (out.match(/UNVERIFIED/g) || []).length;
+    pass += p; fail += f; unverified += u;
+    rows.push([name, p, f]);
+    console.log(`${name.padEnd(16)} ${String(p).padStart(3)} pass  ${f} fail`);
+    if (f) console.log(out.split('\n').filter(l => l.startsWith('  ✗')).join('\n'));
 }
 
-console.log('\n================ SUITE ================');
-for (const r of results) console.log(`  ${r.code === 0 ? 'PASS' : 'FAIL'}  ${r.file.padEnd(16)} ${r.secs}s`);
-process.exit(results.some((r) => r.code !== 0) ? 1 : 0);
+console.log('-'.repeat(40));
+console.log(`TOTAL ${pass} pass, ${fail} fail` + (unverified ? `  (${unverified} explicitly unverified)` : ''));
+process.exit(fail ? 1 : 0);

@@ -1,4 +1,11 @@
-/** Guide step 5: type into duckduckgo's real search box, exactly as written. */
+/**
+ * Guide step 5: type into a real third-party page's search box.
+ *
+ * The guide originally named duckduckgo and `input[name="q"]`; that element does
+ * not exist there (its box is a <textarea>), so a reviewer following it would
+ * have seen a failure. It uses wikipedia's #searchInput now, and this test runs
+ * against the live site so the guide cannot drift from reality again.
+ */
 import { launch, sleep, until, EXT } from './harness.mjs';
 const b = await launch(9421);
 const pass=[], fail=[];

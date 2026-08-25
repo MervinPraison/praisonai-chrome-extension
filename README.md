@@ -139,8 +139,8 @@ archive. See <https://chrome.praison.ai/removed-features/>.
 
 Six, and no host permissions declared.
 
-> **Chrome will still warn** that the extension can *"Read and change all your
-> data on all websites."* That comes from `debugger`, which the DevTools
+> **Chrome shows two install warnings** — *"Access the page debugger backend"*
+> and *"Read and change all your data on all websites."* Both come from `debugger`, which the DevTools
 > Protocol requires — it is the ceiling of what the permission allows, not what
 > the extension does. `chrome.permissions.getAll()` reports `origins: []`. The
 > debugger attaches to one tab at a time and only in response to something you

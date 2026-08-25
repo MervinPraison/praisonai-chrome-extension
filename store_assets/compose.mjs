@@ -60,7 +60,16 @@ try {
   await shoot('03-screenshot');
 
   await ev(`document.querySelector('.mode-tab[data-mode="history"]').click(); true`);
-  await sleep(700);
+  // The panel target is render-throttled while the page target is active, and
+  // the tab pill has a 0.2s transition - give it time to actually paint, then
+  // assert the state before capturing.
+  await b.send('Target.activateTarget', { targetId: panelId });
+  await until('history active', async () => await ev(`
+      document.querySelector('.mode-tab[data-mode="history"]').classList.contains('active') &&
+      !document.querySelector('.mode-tab[data-mode="tools"]').classList.contains('active') &&
+      document.getElementById('mode-history').classList.contains('active')
+  `));
+  await sleep(1200);
   await shoot('04-history');
 } finally { await b.close(); }
 

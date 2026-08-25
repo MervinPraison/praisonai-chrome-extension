@@ -23,10 +23,11 @@ npm run build
 node store_assets/compose.mjs
 ```
 
-## v1.0.3-rejected — do not upload
+## The rejected assets are gone
 
-Kept only so the difference is auditable. `screenshot_1280x800.png` shows the
-removed Agent tab, "Start Agent" and "Agent Activity"; both tiles carry
-"AI-Powered Browser Automation" and "Automate with Natural Language" baked into
-the image. Chrome Web Store policy on false or misleading information covers
-imagery, so uploading any of these would re-trigger the original rejection.
+The screenshot and tiles that accompanied the rejected submission used to sit in
+`store_assets/v1.0.3-rejected/`. They have been deleted: the screenshot showed the
+removed Agent tab, and both tiles had "AI-Powered Browser Automation" and
+"Automate with Natural Language" baked into the image. Keeping publicly-rendered
+copies in a repository the store listing links to was itself a liability. They
+remain recoverable from git history if ever needed.

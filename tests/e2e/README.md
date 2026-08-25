@@ -38,8 +38,9 @@ Two rules worth knowing before adding a test:
 
 | File | Covers |
 | --- | --- |
+| `install.mjs` | what Chrome reports about the install: granted permissions, removed APIs, bound shortcuts, menus, CSP enforcement, storage caps, 360px render in both themes |
 | `smoke.mjs` | every advertised feature, end to end |
-| `reviewer-guide.mjs` | the numbered steps from `STORE_LISTING.md`, against real sites |
+| `reviewer-guide.mjs` | the numbered steps from `STORE_LISTING.md`, against the real example.com |
 | `step5.mjs` | typing into a real third-party page (wikipedia) |
 | `restricted.mjs` | `chrome://`, the Web Store, `about:blank`, a new tab, rapid switching |
 | `windows.mjs` | two windows, one panel each — per-window scoping |
@@ -49,3 +50,16 @@ Two rules worth knowing before adding a test:
 | `attachrace.mjs` | concurrent attaches, and that closing the panel ends every session |
 | `detach.mjs` | session lifecycle |
 | `menus.mjs` | command and context-menu registration, side-panel behaviour |
+
+## What these tests cannot cover
+
+Headless Chrome runs no browser UI, so `menus.mjs` reports three checks as
+**UNVERIFIED** rather than pretending otherwise:
+
+- clicking a native context-menu item
+- delivery of the keyboard shortcuts (both *are* registered with bound keys —
+  `install.mjs` reads them back from `chrome.commands.getAll()`)
+- `chrome.sidePanel.open()`, which needs a real user gesture
+
+Everything else about those paths — registration, handler behaviour, the
+messages they send — is covered. Only the final click is not.
