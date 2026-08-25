@@ -410,39 +410,25 @@ entry point in the build and is not included in the package. See
 
 ---
 
-## Promo Assets
+## Store Assets
 
-### Regenerated — ready to upload
+**Everything needed is in `store_assets/v1.0.4/`.** See `store_assets/README.md`.
 
-Both tiles were rebuilt to match the original design with compliant copy. Use
-these, not the originals in `store_assets/`.
-
-| File | Size | Copy |
+| Asset | File | Status |
 | --- | --- | --- |
-| `store_assets/v1.0.4/marquee_promo_tile_1400x560.jpg` | 1400×560 | "PraisonAI Browser Agent" / "Browser Automation Side Panel" / "Navigate · Click · Type · Run JavaScript · Screenshot" |
-| `store_assets/v1.0.4/small_promo_tile_440x280.jpg` | 440×280 | "PraisonAI" / "Browser Automation Side Panel" / "Navigate · Click · Type · Screenshot" |
+| Screenshot 1 | `screenshot_01-run-javascript_1280x800.png` | Ready |
+| Screenshot 2 | `screenshot_02-extract-data_1280x800.png` | Ready |
+| Screenshot 3 | `screenshot_03-screenshot_1280x800.png` | Ready |
+| Screenshot 4 | `screenshot_04-history_1280x800.png` | Ready |
+| Small promo tile | `small_promo_tile_440x280.jpg` | Ready |
+| Marquee tile | `marquee_promo_tile_1400x560.jpg` | Ready (optional) |
+| Store icon | shipped in the package (`icons/icon128.png`) | Ready |
 
-The originals said "AI-Powered Browser Automation", "Control with Natural
-Language" and "AI Browser Agent". Store policy on false or misleading
-information covers images, so those must not be uploaded again.
+The screenshots are real captures of the built extension driving a live
+`example.com` — the left half is the page, the right half is the side panel, at
+the proportions Chrome docks them. Regenerate with `node store_assets/compose.mjs`.
 
-### Screenshot — you must capture this yourself
-
-`store_assets/screenshot_1280x800.png` shows the removed Agent tab, the
-"Start Agent" button, "Agent Activity", and the "search for 'AI agents'"
-placeholder. It advertises the exact feature that was removed and cannot be
-reused.
-
-A store screenshot has to show the real product, so capture it during the smoke
-test rather than mocking it up:
-
-1. `npm run build`, then load `dist/` unpacked at `chrome://extensions`
-2. Open a normal site (example.com), open the side panel
-3. Run one action so the Output box has real content — "Extract Data" gives a
-   nice JSON payload, or run `document.title`
-4. Capture the window at **1280×800** (or 640×400)
-5. Save as `store_assets/v1.0.4/screenshot_1280x800.png`
-
-Take two or three while you are there — a listing is allowed up to five, and
-showing the Tools tab, a screenshot result, and the History tab covers the
-feature list. At least one screenshot is required.
+**Do not upload anything from `store_assets/v1.0.3-rejected/`.** Those are the
+assets that accompanied the rejected submission: the screenshot shows the
+removed Agent tab, and both tiles carry "AI-Powered Browser Automation" and
+"Automate with Natural Language" baked into the image.

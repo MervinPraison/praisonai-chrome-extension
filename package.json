@@ -1,6 +1,6 @@
 {
     "name": "praisonai-chrome-extension",
-    "version": "1.0.0",
+    "version": "1.0.4",
     "description": "PraisonAI Browser Agent - side panel browser automation via the Chrome DevTools Protocol",
     "private": true,
     "type": "module",
