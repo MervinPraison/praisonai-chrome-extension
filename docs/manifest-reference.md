@@ -9,7 +9,6 @@ an honest justification for each permission.
     "name": "PraisonAI Browser Agent",
     "version": "1.0.4",
     "description": "Side panel browser automation. Navigate, click, type, run JavaScript, extract page data, and capture screenshots.",
-    "author": "MervinPraison",
     "homepage_url": "https://chrome.praison.ai",
     "minimum_chrome_version": "116",
     "permissions": [

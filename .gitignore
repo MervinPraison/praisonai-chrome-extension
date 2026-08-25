@@ -51,3 +51,4 @@ temp/
 # yarn.lock
 .external-pages-todo.md
 .dashboard-notes.md
+site/

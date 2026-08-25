@@ -16,7 +16,10 @@ for (const name of SUITES) {
     const out = (r.stdout || '') + (r.stderr || '');
     const p = (out.match(/^ {2}✓/gm) || []).length;
     const f = (out.match(/^ {2}✗/gm) || []).length;
-    const u = (out.match(/UNVERIFIED/g) || []).length;
+    // Count the section header's declared total, not loose mentions of the
+    // word, so rewording an item cannot drift the number.
+    const m = out.match(/UNVERIFIED \((\d+)\)/);
+    const u = m ? Number(m[1]) : 0;
     pass += p; fail += f; unverified += u;
     rows.push([name, p, f]);
     console.log(`${name.padEnd(16)} ${String(p).padStart(3)} pass  ${f} fail`);

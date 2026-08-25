@@ -345,6 +345,51 @@ describe('CDPClient', () => {
             expect(result.data).toBeUndefined();
         });
 
+        it('reports failure when the mouse press fails', async () => {
+            const client = new CDPClient(123);
+            await client.attach();
+
+            // mouseMoved resolves, mousePressed does not. A click() that
+            // returned success here would make clickElement stop at method 1
+            // instead of falling through to its JS and focus+Enter fallbacks,
+            // and the panel would print "Clicked <selector>" regardless.
+            mockChrome.debugger.sendCommand
+                .mockResolvedValueOnce({})
+                .mockRejectedValueOnce(new Error('Detached while handling command'));
+
+            const result = await client.click(10, 20);
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Detached');
+        });
+
+        it('reports failure when the mouse release fails', async () => {
+            const client = new CDPClient(123);
+            await client.attach();
+
+            mockChrome.debugger.sendCommand
+                .mockResolvedValueOnce({})
+                .mockResolvedValueOnce({})
+                .mockRejectedValueOnce(new Error('Detached while handling command'));
+
+            const result = await client.click(10, 20);
+
+            expect(result.success).toBe(false);
+        });
+
+        it('reports failure when inserting text fails at the transport', async () => {
+            const client = new CDPClient(123);
+            await client.attach();
+
+            mockChrome.debugger.sendCommand.mockRejectedValueOnce(
+                new Error('Detached while handling command')
+            );
+
+            const result = await client.type('hello');
+
+            expect(result.success).toBe(false);
+        });
+
         it('reports failure when the scroll command fails', async () => {
             const client = new CDPClient(123);
             await client.attach();
