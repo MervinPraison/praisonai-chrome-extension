@@ -73,14 +73,20 @@ function updateTabInfo(tab: chrome.tabs.Tab) {
  * Check AI status
  */
 async function checkAIStatus() {
-    const result = await builtInAI.checkCapabilities();
+    try {
+        const result = await builtInAI.checkCapabilities();
 
-    if (result.success && result.data?.promptApiAvailable) {
-        elements.aiStatus.className = 'ai-status ready';
-        elements.aiStatus.querySelector('.ai-text')!.textContent = 'Gemini Nano Ready';
-    } else {
+        if (result.success && result.data?.promptApiAvailable) {
+            elements.aiStatus.className = 'ai-status ready';
+            elements.aiStatus.querySelector('.ai-text')!.textContent = 'Gemini Nano + bridge';
+        } else {
+            elements.aiStatus.className = 'ai-status unavailable';
+            elements.aiStatus.querySelector('.ai-text')!.textContent =
+                'Server AI via bridge (built-in optional)';
+        }
+    } catch {
         elements.aiStatus.className = 'ai-status unavailable';
-        elements.aiStatus.querySelector('.ai-text')!.textContent = 'Built-in AI Unavailable';
+        elements.aiStatus.querySelector('.ai-text')!.textContent = 'Server AI via bridge';
     }
 }
 
@@ -182,9 +188,18 @@ async function stopAgent() {
  */
 function handleMessage(message: { type: string;[key: string]: unknown }) {
     switch (message.type) {
-        case 'AGENT_STEP':
-            addStep(message.step as { action: { type: string; reason: string }; result: { success: boolean } });
+        case 'AGENT_STEP': {
+            const step = message.step as { action: { type: string; reason: string }; result: { success: boolean } };
+            addStep(step);
+            if (step.action.type === 'done') {
+                setOutput(step.action.reason || 'Task completed.');
+                updateStatus('ready', 'Completed');
+                elements.startAgent.disabled = false;
+                elements.stopAgent.disabled = true;
+                isAgentRunning = false;
+            }
             break;
+        }
 
         case 'AGENT_COMPLETE':
             // Task completed - show summary and stop
@@ -259,15 +274,17 @@ async function handleToolAction(action: string) {
     setOutput('Loading...');
 
     switch (action) {
-        case 'screenshot':
+        case 'screenshot': {
             const screenshotResult = await sendMessage({ type: 'CDP_SCREENSHOT', tabId: currentTabId });
-            if (screenshotResult.success && screenshotResult.data?.data) {
-                setOutput(`Screenshot captured (${Math.round(screenshotResult.data.data.length / 1024)}KB)`);
+            const shotPayload = screenshotResult.data as { data?: string } | undefined;
+            if (screenshotResult.success && shotPayload?.data) {
+                setOutput(`Screenshot captured (${Math.round(shotPayload.data.length / 1024)}KB)`);
                 // Could display the image here
             } else {
                 setOutput(`Error: ${screenshotResult.error}`);
             }
             break;
+        }
 
         case 'summarize':
             const tab = await chrome.tabs.get(currentTabId);
@@ -300,7 +317,8 @@ async function handleToolAction(action: string) {
         }, null, 2)
       ` });
             if (extractResult.success) {
-                setOutput(extractResult.data);
+                const extracted = extractResult.data;
+                setOutput(typeof extracted === 'string' ? extracted : JSON.stringify(extracted, null, 2));
             } else {
                 setOutput(`Error: ${extractResult.error}`);
             }
