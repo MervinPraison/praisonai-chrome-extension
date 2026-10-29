@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * *'
 
 permissions:
   contents: read
@@ -29,7 +31,20 @@ jobs:
       - name: Install MkDocs
         run: pip install mkdocs-material
 
+      - name: Check out shared theme
+        uses: actions/checkout@v4
+        with:
+          repository: MervinPraison/praisonai-docs-theme
+          ssh-key: ${{ secrets.PRAISONAI_THEME_DEPLOY_KEY }}
+          persist-credentials: false
+          path: .praisonai-theme
+
+      - name: Install shared theme
+        run: pip install ./.praisonai-theme
+
       - name: Build docs
+        env:
+          PRAISONAI_THEME: praisonai
         run: mkdocs build
 
       - name: Upload artifact

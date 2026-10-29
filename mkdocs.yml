@@ -1,10 +1,12 @@
 site_name: PraisonAI Browser Agent
 site_url: https://chrome.praison.ai
+copyright: 'Original site design © 2026 Mervin Praison. All rights reserved. Third-party components retain their respective licenses.'
 repo_url: https://github.com/MervinPraison/praisonai-chrome-extension
 repo_name: praisonai-chrome-extension
 
 theme:
-  name: material
+  name: !ENV [PRAISONAI_THEME, material]
+  font: false
   palette:
     primary: deep purple
     accent: amber
