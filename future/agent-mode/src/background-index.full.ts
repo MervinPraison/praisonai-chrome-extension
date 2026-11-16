@@ -377,7 +377,7 @@ async function ensureNoActiveDebugger(tabId?: number): Promise<void> {
             if (oldClient) {
                 console.log(`[PraisonAI] Cleaning up previous session on tab ${previousTabId}`);
                 try {
-                    await oldClient.disconnect();
+                    await oldClient.detach();
                 } catch (e) {
                     console.warn('[PraisonAI] Previous session disconnect warning:', e);
                 }
@@ -395,7 +395,7 @@ async function ensureNoActiveDebugger(tabId?: number): Promise<void> {
             if (existingClient) {
                 console.log(`[PraisonAI] Disconnecting existing CDP on target tab ${tabId}`);
                 try {
-                    await existingClient.disconnect();
+                    await existingClient.detach();
                 } catch (e) {
                     console.warn('[PraisonAI] Existing CDP disconnect warning:', e);
                 }
@@ -677,7 +677,7 @@ async function initBridgeConnection(): Promise<boolean> {
                             console.log('[PraisonAI] CLI task completed - stopping session');
                             const client = cdpSessions.get(tabId);
                             if (client) {
-                                client.disconnect().catch(() => { });
+                                client.detach().catch(() => { });
                                 cdpSessions.delete(tabId);
                             }
                             await bridgeClient?.stopSession();
@@ -874,7 +874,7 @@ async function initBridgeConnection(): Promise<boolean> {
                     // Clean up CDP before ending session
                     const client = cdpSessions.get(tabId);
                     if (client) {
-                        client.disconnect().catch(() => { });
+                        client.detach().catch(() => { });
                         cdpSessions.delete(tabId);
                     }
                     // Properly end the session
@@ -1347,7 +1347,20 @@ async function handleMessage(
                         bridgeClient!.onAction = async (action) => {
                             const actionStart = performance.now();
                             console.log(`[PraisonAI][PERF] Action START: ${action.action}`);
+                            chrome.runtime.sendMessage({
+                                type: 'AGENT_STEP',
+                                tabId,
+                                step: {
+                                    action: { type: action.action, reason: action.thought || '' },
+                                    result: { success: true },
+                                },
+                            }).catch(() => { });
                             if (action.done || action.action === 'done') {
+                                chrome.runtime.sendMessage({
+                                    type: 'AGENT_COMPLETE',
+                                    tabId,
+                                    summary: action.thought || 'Task completed.',
+                                }).catch(() => { });
                                 await bridgeClient?.stopSession();
                                 return;
                             }
@@ -1399,8 +1412,22 @@ async function handleMessage(
  * Attach CDP to tab
  */
 async function attachCDP(tabId: number) {
-    if (cdpSessions.has(tabId)) {
-        return { success: true, data: 'Already attached' };
+    await ensureNoActiveDebugger(tabId);
+
+    const existing = cdpSessions.get(tabId);
+    if (existing?.isAttached()) {
+        return { success: true, data: existing };
+    }
+    if (existing) {
+        cdpSessions.delete(tabId);
+    }
+
+    // Orphan debugger from a crashed session (Chrome still shows the yellow banner)
+    try {
+        await chrome.debugger.detach({ tabId });
+        await new Promise((r) => setTimeout(r, 400));
+    } catch {
+        // Tab had no debugger attached
     }
 
     const result = await createCDPClient(tabId);
@@ -1496,14 +1523,77 @@ async function evaluate(tabId: number, expression: string) {
     }
     return client.evaluate(expression);
 }
+/** Snapshot for SPA click verification (URL often unchanged, e.g. WhatsApp Web). */
+type InteractionSurface = {
+    title: string;
+    url: string;
+    hasComposeInput: boolean;
+    mainPaneChars: number;
+};
+
+async function readInteractionSurface(client: CDPClient): Promise<InteractionSurface> {
+    const pageState = await client.getPageState();
+    const url = pageState.data?.url || '';
+    const title = pageState.data?.title || '';
+    const evalResult = await client.evaluate(`(() => {
+        const compose =
+            document.querySelector('[data-testid="conversation-compose-box-input"]') ||
+            document.querySelector('footer div[contenteditable="true"]') ||
+            document.querySelector('#main footer [contenteditable="true"]');
+        const main = document.querySelector('#main') || document.querySelector('[role="main"]');
+        return {
+            hasComposeInput: !!compose,
+            mainPaneChars: main ? (main.innerText || '').length : 0,
+        };
+    })()`);
+    const data =
+        evalResult.success && evalResult.data && typeof evalResult.data === 'object'
+            ? (evalResult.data as { hasComposeInput?: boolean; mainPaneChars?: number })
+            : {};
+    return {
+        title,
+        url,
+        hasComposeInput: Boolean(data.hasComposeInput),
+        mainPaneChars: Number(data.mainPaneChars) || 0,
+    };
+}
+
+function interactionSurfaceChanged(before: InteractionSurface, after: InteractionSurface): boolean {
+    if (before.url !== after.url) return true;
+    if (before.title !== after.title) return true;
+    if (!before.hasComposeInput && after.hasComposeInput) return true;
+    if (after.mainPaneChars > before.mainPaneChars + 40) return true;
+    return false;
+}
+
+/** Wait until the bridge server assigns a session id (offscreen WS is async). */
+async function waitForBridgeSession(client: BridgeClient, timeoutMs = 20000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (client.currentSessionId && client.isSessionActive()) {
+            return true;
+        }
+        await new Promise((r) => setTimeout(r, 100));
+    }
+    return Boolean(client.currentSessionId && client.isSessionActive());
+}
+
 /**
  * Start browser agent
  */
 async function startAgent(tabId: number, goal: string) {
-    const client = await ensureCDP(tabId);
-    if (!client) {
-        return { success: false, error: 'Failed to attach CDP' };
+    const attachResult = await attachCDP(tabId);
+    if (!attachResult.success || !attachResult.data || typeof attachResult.data === 'string') {
+        const detail =
+            typeof attachResult.error === 'string'
+                ? attachResult.error
+                : 'Failed to attach CDP';
+        return {
+            success: false,
+            error: `${detail}. Click Stop, cancel the debugging banner, refresh the tab, then try again.`,
+        };
     }
+    const client = cdpSessions.get(tabId)!;
 
     // Stop existing agent
     const existingAgent = agents.get(tabId);
@@ -1520,14 +1610,23 @@ async function startAgent(tabId: number, goal: string) {
         sessionActionLog = [];
         currentSessionGoal = goal;
 
-        // Start session with bridge
+        // Start session with bridge (session id arrives asynchronously on the WS)
         await bridgeClient.startSession(goal);
+        const sessionReady = await waitForBridgeSession(bridgeClient, 20000);
+        if (!sessionReady) {
+            const err =
+                'Bridge session did not start. Keep `praisonai browser start` running, reload the extension, use an https tab (not chrome://), then try again.';
+            console.error('[PraisonAI]', err);
+            chrome.runtime.sendMessage({ type: 'AGENT_COMPLETE', tabId, summary: err }).catch(() => { });
+            return { success: false, error: err };
+        }
+        console.log('[PraisonAI] Bridge session ready:', bridgeClient.currentSessionId?.substring(0, 8));
         bridgeClient.setCDPClient(client);
 
         // Setup action handler with retry detection
         const actionHistory: { action: string; selector: string; count: number }[] = [];
         let lastActionResult: { success: boolean; error?: string } | null = null;
-        let failedClicksWithoutUrlChange = 0;  // Track clicks that don't navigate
+        let failedClicksWithoutEffect = 0;  // Clicks with no URL/title/compose change
 
         bridgeClient.onAction = async (action) => {
             console.log('[PraisonAI] Received action:', action);
@@ -1553,6 +1652,11 @@ async function startAgent(tabId: number, goal: string) {
             // Check for completion or max steps
             if (action.done || action.action === 'done') {
                 console.log('[PraisonAI] Task completed, stopping agent');
+                chrome.runtime.sendMessage({
+                    type: 'AGENT_COMPLETE',
+                    tabId,
+                    summary: action.thought || 'Task completed.',
+                }).catch(() => { });
                 stopAgent(tabId);
                 return;
             }
@@ -1590,33 +1694,33 @@ async function startAgent(tabId: number, goal: string) {
 
             // Execute the action
             try {
-                const pageState = await client.getPageState();
-                const currentUrl = pageState.data?.url || '';
+                const surfaceBefore =
+                    action.action === 'click' ? await readInteractionSurface(client) : null;
 
                 const result = await bridgeClient!.executeAction(action);
                 lastActionResult = { success: result.success, error: result.error };
 
-                // *** FIX: Detect clicks that don't change URL (failed navigation) ***
+                // Detect clicks with no visible effect (SPAs / WhatsApp Web)
                 let clickError = result.error;
-                if (action.action === 'click' && result.success) {
-                    // Wait a bit for navigation to start
-                    await new Promise(r => setTimeout(r, 500));
-                    const newPageState = await client.getPageState();
-                    const newUrl = newPageState.data?.url || '';
+                if (action.action === 'click' && result.success && surfaceBefore) {
+                    await new Promise(r => setTimeout(r, 600));
+                    const surfaceAfter = await readInteractionSurface(client);
 
-                    if (newUrl === currentUrl) {
-                        // URL didn't change - count as failed click
-                        failedClicksWithoutUrlChange++;
-                        console.log(`[PraisonAI] Click didn't change URL (${failedClicksWithoutUrlChange} times)`);
-
-                        if (failedClicksWithoutUrlChange >= 3) {
-                            clickError = `CLICK DID NOT NAVIGATE! Tried ${failedClicksWithoutUrlChange} times with no URL change. The selector "${actionSelector}" is not clickable or is incorrect. TRY: 1) Use "navigate" action with URL directly, 2) Use a completely different selector, 3) Look for visible link text instead of icon elements`;
-                            console.log('[PraisonAI] Multiple failed clicks without URL change, forcing different approach');
+                    if (!interactionSurfaceChanged(surfaceBefore, surfaceAfter)) {
+                        failedClicksWithoutEffect++;
+                        console.log(
+                            `[PraisonAI] Click had no visible effect (${failedClicksWithoutEffect}x)`,
+                        );
+                        clickError =
+                            `CLICK HAD NO VISIBLE EFFECT (selector "${actionSelector}"). ` +
+                            'The chat/panel may not have opened. TRY: search for the contact, ' +
+                            'click the row once manually, or use a different selector / JS click.';
+                        if (failedClicksWithoutEffect >= 2) {
+                            action.clickMethod = 'js';
                         }
                     } else {
-                        // URL changed - reset counter
-                        failedClicksWithoutUrlChange = 0;
-                        console.log(`[PraisonAI] URL changed: ${currentUrl.slice(0, 50)} -> ${newUrl.slice(0, 50)}`);
+                        failedClicksWithoutEffect = 0;
+                        console.log('[PraisonAI] Click changed page surface (title/compose/main pane)');
                     }
                 }
 
@@ -1833,7 +1937,7 @@ async function stopAgent(tabId: number) {
         if (cdpClient) {
             console.log('[PraisonAI] Disconnecting CDP client for tab', tabId);
             try {
-                await cdpClient.disconnect();
+                await cdpClient.detach();
             } catch (err) {
                 console.warn('[PraisonAI] CDP disconnect warning:', err);
             }

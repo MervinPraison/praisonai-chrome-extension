@@ -687,6 +687,7 @@ export class BridgeClient {
                     break;
 
                 case 'pong':
+                case 'heartbeat_ack':
                     // Heartbeat response
                     break;
 

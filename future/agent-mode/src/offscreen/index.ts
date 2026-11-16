@@ -145,14 +145,14 @@ function stopHeartbeat(): void {
 // RECORDING STATE
 // ============================================================
 
-interface RecordingState {
+interface TabRecordingState {
     isRecording: boolean;
     mediaRecorder: MediaRecorder | null;
     chunks: Blob[];
     startTime: number;
 }
 
-const recordingState: RecordingState = {
+const recordingState: TabRecordingState = {
     isRecording: false,
     mediaRecorder: null,
     chunks: [],
