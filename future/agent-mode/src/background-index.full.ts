@@ -1566,6 +1566,16 @@ function interactionSurfaceChanged(before: InteractionSurface, after: Interactio
     return false;
 }
 
+/** SPA click-effect checks are noisy on generic sites; limit to WhatsApp Web. */
+function shouldVerifySpaClickEffect(url: string): boolean {
+    try {
+        const host = new URL(url).hostname.toLowerCase();
+        return host === 'web.whatsapp.com' || host.endsWith('.web.whatsapp.com');
+    } catch {
+        return false;
+    }
+}
+
 /** Wait until the bridge server assigns a session id (offscreen WS is async). */
 async function waitForBridgeSession(client: BridgeClient, timeoutMs = 20000): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
@@ -1694,8 +1704,13 @@ async function startAgent(tabId: number, goal: string) {
 
             // Execute the action
             try {
+                const pageState = await client.getPageState();
+                const currentUrl = pageState.data?.url || '';
+
                 const surfaceBefore =
-                    action.action === 'click' ? await readInteractionSurface(client) : null;
+                    action.action === 'click' && shouldVerifySpaClickEffect(currentUrl)
+                        ? await readInteractionSurface(client)
+                        : null;
 
                 const result = await bridgeClient!.executeAction(action);
                 lastActionResult = { success: result.success, error: result.error };
