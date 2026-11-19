@@ -5,8 +5,9 @@ site:
   title: PraisonAI Browser Agent
   ui: shadcn
   theme:
-    preset: purple
-    darkMode: true
+    preset: paper
+    radius: md
+    mode: system
 seo:
   siteUrl: https://chrome.praison.ai
 navigation:
