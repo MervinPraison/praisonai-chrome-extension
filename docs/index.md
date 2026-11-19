@@ -1,3 +1,16 @@
+---
+layout: home
+title: PraisonAI Browser Agent
+hero:
+  name: PraisonAI Browser Agent
+  text: PraisonAI Browser Agent
+  actions:
+  - text: Quick start
+    link: getting-started/installation.md
+  - text: View on GitHub
+    link: https://github.com/MervinPraison/praisonai-chrome-extension
+    theme: alt
+---
 # PraisonAI Browser Agent
 
 A Chrome side panel that drives the tab you are looking at, using the Chrome

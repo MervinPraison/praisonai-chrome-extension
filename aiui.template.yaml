@@ -12,43 +12,44 @@ seo:
   siteUrl: https://chrome.praison.ai
 navigation:
   tabs:
-  - tab: Home
+  - tab: Docs
     groups:
-    - group: Home
+    - group: Get started
       pages:
       - index
-  - tab: Getting Started
-    groups:
+      icon: rocket
     - group: Getting Started
       pages:
       - getting-started/installation
       - getting-started/quick-start
+      icon: rocket
       prefix: getting-started
-  - tab: Features
-    groups:
     - group: Features
       pages:
       - features/cdp-automation
       - features/side-panel
       - features/screenshots
       - features/page-data
+      icon: book-open
       prefix: features
-  - tab: Architecture
-    groups:
     - group: Architecture
       pages:
       - architecture/overview
       - architecture/cdp-client
+      icon: book-open
       prefix: architecture
-  - tab: Reference
-    groups:
     - group: Reference
       pages:
       - side-panel-api
       - manifest-reference
       - privacy
       - removed-features
+      icon: terminal
 navbar:
+  primary:
+    type: button
+    label: Quick start
+    href: /docs/getting-started/installation
   links:
   - label: GitHub
     href: https://github.com/MervinPraison/praisonai-chrome-extension
@@ -64,6 +65,8 @@ content:
     include:
     - '**/*.md'
     - '**/*.mdx'
+    nav:
+      mode: manual
 templates:
   docs:
     layout: ThreeColumnLayout
